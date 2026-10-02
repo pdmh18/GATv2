@@ -1,0 +1,27 @@
+kafka:
+  topics: [user-event, transaction, account-update]
+paths:
+  raw: data/raw
+  interim: data/interim
+  processed: data/processed
+  splits: data/splits
+  models: models
+  reports: reports
+split:
+  train: 0.7
+  val: 0.15
+  test: 0.15
+  time_based: true
+features:
+  window_hours: [1, 24, 168]
+  use_graph: true
+model:
+  name: null        # chưa chốt
+  params: {}
+tuning:
+  method: null      # chưa chốt
+  n_trials: 20
+target_metrics:
+  f1: 0.80
+  auc_roc: 0.90
+  max_iterations: 3
