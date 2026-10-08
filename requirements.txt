@@ -12,3 +12,5 @@ esdbclient
 pymongo
 joblib
 pytest
+torch
+torch-geometric

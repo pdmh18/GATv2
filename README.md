@@ -1,94 +1,412 @@
-# Fraud Detection Pipeline
+# Fraud Detection ML Pipeline - GATv2
 
-Khung project theo sơ đồ 10 khối: Event & Pipeline -> Tiền xử lý -> Feature Engineering -> Chia tập -> Train -> Tuning -> Đánh giá -> So sánh -> Lưu model -> Inference.
+Dự án xây dựng pipeline Machine Learning phục vụ bài toán **phát hiện giao dịch tài chính bất thường/gian lận theo thời gian thực**, kết hợp dữ liệu giao dịch, lịch sử hành vi và cấu trúc graph.
 
-## Trạng thái hiện tại
-- Đây mới là **khung project**, làm dần từng khối.
-- `scripts/run_pipeline.py --stage ...` hiện **chỉ in log**, chưa gọi các module thật. Cần nối trong `src/fraud_pipeline/pipeline.py` khi làm từng khối (ví dụ `stage_ingest()` chưa gọi `ingestion/`).
-- **Chưa chốt thuật toán**: `models/`, `tuning/`, `registry/` mới là khung trống; `configs/config.yaml` để `model.name` và `tuning.method` là `null`.
-- `features/graph.py` và `ingestion/simulator.py` (nhãn fraud đang đặt cứng = 0) còn `TODO`.
-- `evaluation/compare.py`: chưa có model baseline (phương pháp truyền thống) để so sánh. Trong `run_training_loop()` đang đặt cứng `reached = True`.
+Thuật toán GNN chính đang sử dụng trong hướng nghiên cứu hiện tại là **GATv2 (Graph Attention Network v2)**.
 
-| Khối | Trạng thái |
-|---|---|
-| 1. Event & Pipeline | Chưa nối, có code khung |
-| 2. Khảo sát & tiền xử lý | Chưa nối, có code khung |
-| 3. Feature Engineering | Chưa nối, có code khung |
-| 4. Chia tập | Chưa nối, có code khung |
-| 5. Train | Khung trống |
-| 6. Tuning | Khung trống |
-| 7-8. Đánh giá, so sánh | Chưa nối, có code khung |
-| 9. Lưu model | Khung trống |
-| 10. Inference | Chưa nối, có code khung |
+> Trạng thái hiện tại: đã dựng cấu trúc project và thêm model GATv2 theo kiến trúc của đồ án. Các bước xử lý dữ liệu, Feature Engineering, training, tuning, evaluation và inference sẽ được hoàn thiện theo từng giai đoạn của pipeline.
 
-## Cấu trúc project
+---
+
+## 1. Mục tiêu
+
+Pipeline hướng đến các bước chính:
+
+1. Thu thập event và dữ liệu giao dịch.
+2. Tiền xử lý và làm sạch dữ liệu.
+3. Feature Engineering.
+4. Chia Train / Validation / Test.
+5. Xây dựng và huấn luyện model.
+6. Hyperparameter Tuning.
+7. Đánh giá bằng Precision, Recall, F1-score, AUC-ROC.
+8. So sánh với phương pháp truyền thống.
+9. Lưu model.
+10. Inference / dự đoán giao dịch mới.
+
+---
+
+## 2. Kiến trúc dữ liệu dự kiến
+
+### Graph representation
+
+Trong đồ án, graph được biểu diễn theo hướng:
+
+- **Node = Account (Tài khoản)**
+- **Edge = Transaction (Giao dịch)**
+
+Mỗi tài khoản có thể chứa các đặc trưng của account và các đặc trưng hành vi đã tổng hợp.
+
+Mỗi giao dịch có thể chứa các đặc trưng như:
+
+- amount
+- transaction_type
+- channel
+- authentication
+- platform
+- thời gian giao dịch
+- behavioral features
+- temporal features
+
+Ví dụ một số feature được tạo ở bước Feature Engineering:
+
+- `avg_amount_7d`: số tiền giao dịch trung bình trong 7 ngày gần nhất.
+- `tx_count_1h`: số giao dịch trong 1 giờ gần nhất.
+- `tx_count_24h`: số giao dịch trong 24 giờ gần nhất.
+- `time_since_last_tx`: thời gian kể từ giao dịch gần nhất.
+- `new_receiver`: người nhận có phải người nhận mới hay không.
+- `new_device`: thiết bị có phải thiết bị mới hay không.
+
+---
+
+## 3. Luồng GATv2 trong đồ án
+
+Kiến trúc hiện tại:
+
+```text
+Account Node Features
+        ↓
+GATv2Conv Layer 1
+        ↓
+Activation + Dropout
+        ↓
+GATv2Conv Layer 2
+        ↓
+Account Embeddings
+        ↓
+
+Source Account Embedding
+        +
+Destination Account Embedding
+        +
+Transaction / Behavioral / Temporal Features
+        ↓
+MLP
+        ↓
+Logit
+        ↓
+Sigmoid
+        ↓
+Risk Score (0 - 1)
+        ↓
+Threshold
+        ↓
+Normal / Fraud-Anomaly
 ```
-fraud-detection-pipeline/
-├── configs/            # config.yaml: tham số chung
-├── data/               # raw -> interim -> processed -> splits
-├── models/             # nơi lưu file model đã train
-├── notebooks/          # notebook (EDA...), đang trống
-├── reports/            # biểu đồ, bảng kết quả
-├── scripts/            # run_pipeline.py
-├── tests/              # kiểm tra tự động (pytest)
-├── src/fraud_pipeline/ # CODE của cả 10 khối
-├── .env.example  .gitignore  docker-compose.yml  Makefile
-└── pyproject.toml  README.md  requirements.txt
+
+Hai lớp GATv2 được dùng làm cấu hình khởi đầu. `num_layers` vẫn là một hyperparameter và có thể được thử nghiệm thêm trong giai đoạn tuning.
+
+---
+
+## 4. Cấu trúc project
+
+```text
+GATv2/
+│
+├── configs/
+│   └── config.yaml
+│
+├── data/
+│   ├── raw/
+│   ├── interim/
+│   ├── processed/
+│   └── splits/
+│
+├── models/
+├── notebooks/
+├── reports/
+│
+├── scripts/
+│   └── run_pipeline.py
+│
+├── src/
+│   └── fraud_pipeline/
+│       ├── ingestion/
+│       ├── preprocessing/
+│       ├── features/
+│       ├── models/
+│       │   ├── base.py
+│       │   ├── gatv2.py
+│       │   └── trainer.py
+│       ├── tuning/
+│       ├── evaluation/
+│       ├── registry/
+│       ├── inference/
+│       ├── data_split.py
+│       └── pipeline.py
+│
+├── tests/
+├── requirements.txt
+├── pyproject.toml
+├── docker-compose.yml
+└── README.md
 ```
 
-## Vị trí code của từng khối (đều nằm trong `src/fraud_pipeline/`)
-| Khối | Nội dung | Vị trí | Dữ liệu vào -> ra |
-|---|---|---|---|
-| 1 | Event & Pipeline | `ingestion/` | simulator -> Kafka -> EventStoreDB -> Pandas -> MongoDB |
-| 2 | Khảo sát & tiền xử lý | `preprocessing/` (`eda.py`, `cleaning.py`) | `data/raw` -> `data/interim` |
-| 3 | Feature Engineering | `features/` (`transaction`, `behavioral`, `temporal`, `graph`, `build_features`) | `data/interim` -> `data/processed` |
-| 4 | Chia Train/Val/Test | `data_split.py` (`time_split()`) | `data/processed` -> `data/splits` |
-| 5 | Xây dựng & Train | `models/` (`base.py`, `trainer.py`) | `data/splits` -> `models/` |
-| 6 | Hyperparameter Tuning | `tuning/tuner.py` | nằm trong vòng lặp 5-8 |
-| 7 | Đánh giá | `evaluation/metrics.py`, `plots.py` | kết quả -> `reports/` |
-| 8 | So sánh kết quả | `evaluation/compare.py` | kết quả -> `reports/` |
-| 9 | Lưu model | `registry/save_load.py` | -> `models/` |
-| 10 | Inference | `inference/` (`predictor.py` batch, `stream_inference.py` real-time) | dữ liệu mới -> risk score |
+---
 
-Hai file không thuộc khối nào: `config.py` (đọc cấu hình) và `pipeline.py` (điều phối các khối, chứa vòng lặp "chưa đạt -> chỉnh model/tham số" ở `run_training_loop`). Các khối 5-8 nằm trong vòng lặp này; khối 9 chỉ chạy khi kết quả đã đạt.
+## 5. Model GATv2 hiện tại
 
-## Các thư mục và file ngoài `src/` dùng để làm gì
-| Tên | Vai trò |
-|---|---|
-| `configs/` | `config.yaml`: tỉ lệ chia tập, topic Kafka, ngưỡng đạt (`target_metrics`)... Đổi thông số ở đây, không sửa code. |
-| `data/` | Dữ liệu qua từng bước: `raw` (thô), `interim` (sau tiền xử lý), `processed` (sau feature), `splits` (train/val/test). |
-| `models/` | Lưu file model đã train (khối 9). Khác với `src/fraud_pipeline/models/` là nơi chứa code. |
-| `notebooks/` | Notebook, ví dụ vẽ biểu đồ EDA ở khối 2. Không cần có thể xóa. |
-| `reports/` | Biểu đồ ROC, bảng so sánh (khối 7, 8). |
-| `scripts/` | `run_pipeline.py`: chạy pipeline bằng lệnh. |
-| `tests/` | Test tự động, hiện có test kiểm tra chia tập không bị leakage. Chạy bằng `pytest`. |
-| `.env.example` | Mẫu địa chỉ kết nối Kafka, EventStoreDB, MongoDB. Copy thành `.env` rồi điền thông tin thật. |
-| `.gitignore` | Báo Git bỏ qua `.env`, dữ liệu, model nặng. |
-| `docker-compose.yml` | Dựng Kafka, EventStoreDB, MongoDB bằng `docker compose up -d` (cho khối 1). |
-| `Makefile` | Lệnh tắt (`make train`...). Windows không cài `make` thì bỏ qua được. |
-| `pyproject.toml` | Khai báo project, để Python nhận ra thư mục `src/`. |
-| `requirements.txt` | Danh sách thư viện: `pip install -r requirements.txt`. |
+File chính:
 
-## Cài đặt
-```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env
-docker compose up -d             # Kafka, EventStoreDB, MongoDB
+```text
+src/fraud_pipeline/models/gatv2.py
 ```
 
-## Chạy từng khối
-```bash
-python scripts/run_pipeline.py --stage ingest      # Khối 1
-python scripts/run_pipeline.py --stage preprocess  # Khối 2
-python scripts/run_pipeline.py --stage features    # Khối 3
-python scripts/run_pipeline.py --stage split       # Khối 4
-python scripts/run_pipeline.py --stage train       # Khối 5
-python scripts/run_pipeline.py --stage tune        # Khối 6
-python scripts/run_pipeline.py --stage evaluate    # Khối 7
-python scripts/run_pipeline.py --stage compare     # Khối 8
-python scripts/run_pipeline.py --stage save        # Khối 9
-python scripts/run_pipeline.py --stage infer       # Khối 10
-python scripts/run_pipeline.py --stage all
+Model hiện tại được thiết kế theo bài toán **transaction/edge classification**.
+
+GATv2 trước tiên tạo embedding cho các account node. Sau đó model lấy:
+
+```text
+[source_embedding, destination_embedding, edge_features]
 ```
+
+và ghép thành một vector đầu vào cho MLP để dự đoán mức độ bất thường của từng giao dịch.
+
+Đầu ra trước Sigmoid là **logit** cho mỗi transaction.
+
+Sau Sigmoid:
+
+```text
+Risk Score ∈ [0, 1]
+```
+
+Ví dụ:
+
+```text
+0.05 → nguy cơ thấp
+0.91 → nguy cơ cao
+```
+
+Threshold để chuyển Risk Score thành nhãn 0/1 sẽ được xác định trong giai đoạn đánh giá/tuning, thay vì mặc định coi một ngưỡng cố định là tối ưu.
+
+---
+
+## 6. Training label
+
+Bài toán dự kiến là binary classification:
+
+```text
+0 = Normal
+1 = Fraud / Anomaly
+```
+
+Label là **ground truth dùng để train**, không phải feature đầu vào của model.
+
+Các trường do model hoặc rule engine tạo ra như `risk_score`, `risk_status` không được dùng ngược lại làm feature đầu vào cho chính model nếu điều đó gây data leakage.
+
+---
+
+## 7. Tài liệu tham khảo GATv2
+
+### Bài báo gốc
+
+- **GATv2 - How Attentive are Graph Attention Networks? (ICLR 2022)**  
+  https://arxiv.org/abs/2105.14491
+
+### Code chính thức của tác giả
+
+- **Official GATv2 repository**  
+  https://github.com/tech-srl/how_attentive_are_gats
+
+### Tài liệu thư viện dùng để triển khai
+
+- **GATv2Conv - PyTorch Geometric**  
+  https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.conv.GATv2Conv.html
+
+- **GATConv - phiên bản GAT gốc để đối chiếu**  
+  https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.conv.GATConv.html
+
+- **PyTorch Geometric**  
+  https://github.com/pyg-team/pytorch_geometric
+
+---
+
+# Ghi chú: GATv2 gốc và cách áp dụng trong đồ án
+
+## GATv2 gốc
+
+Bài báo **How Attentive are Graph Attention Networks?** đề xuất GATv2 nhằm khắc phục hạn chế **static attention** của GAT bằng cơ chế **dynamic attention**.
+
+GATv2 gốc là một kiến trúc/layer GNN tổng quát. Nó nhận node features và cấu trúc graph để học representation cho các node. Bài báo gốc không được thiết kế riêng cho bài toán phát hiện gian lận giao dịch tài chính và cũng không quy định:
+
+```text
+Node = Account
+Edge = Transaction
+```
+
+Ngoài ra, bài báo gốc không quy định prediction head riêng theo dạng:
+
+```text
+source_embedding
++ destination_embedding
++ transaction_features
+→ MLP
+→ Fraud / Normal
+```
+
+Đó là phần được thiết kế thêm cho bài toán của đồ án.
+
+## Phiên bản áp dụng trong đồ án
+
+Đồ án **không thay đổi công thức attention cốt lõi của GATv2**. Phần GATv2Conv vẫn sử dụng implementation của PyTorch Geometric.
+
+Những phần được **điều chỉnh / bổ sung để phù hợp với bài toán** gồm:
+
+1. **Thay đổi cách biểu diễn graph**
+
+```text
+GATv2 gốc:
+Graph tổng quát, node/edge phụ thuộc từng dataset và bài toán.
+
+Đồ án:
+Node = Account
+Edge = Transaction
+```
+
+2. **GATv2 được dùng làm encoder cho Account**
+
+```text
+Account Features
+→ GATv2Conv
+→ Account Embedding
+```
+
+Mục tiêu của hai GATv2Conv layers là tổng hợp thông tin từ neighborhood và tạo vector embedding cho mỗi tài khoản.
+
+3. **Chuyển từ node representation sang transaction/edge classification**
+
+Model không dự đoán trực tiếp một account là fraud hay normal.
+
+Đối tượng cần đánh giá trong đồ án là **giao dịch**.
+
+Vì vậy sau GATv2, model lấy embedding của tài khoản nguồn và tài khoản đích:
+
+```text
+emb_source + emb_destination
+```
+
+sau đó ghép thêm các feature của chính giao dịch:
+
+```text
+[emb_source
+ + emb_destination
+ + edge_features]
+```
+
+4. **Bổ sung transaction, behavioral và temporal features**
+
+`edge_features` có thể bao gồm dữ liệu giao dịch gốc và Feature Engineering, ví dụ:
+
+```text
+amount
+transaction_type
+channel
+authentication
+platform
+avg_amount_7d
+tx_count_1h
+tx_count_24h
+time_since_last_tx
+new_receiver
+new_device
+...
+```
+
+Các feature này được bổ sung để model không chỉ nhìn cấu trúc graph mà còn có thông tin về giao dịch hiện tại và hành vi lịch sử gần đây.
+
+5. **Bổ sung MLP prediction head**
+
+Sau khi ghép:
+
+```text
+emb_source + emb_destination + edge_features
+```
+
+vector này được đưa qua **MLP** để tạo một logit cho từng transaction.
+
+```text
+GATv2 Encoder
+      ↓
+Account Embeddings
+      ↓
+[emb_source + emb_destination + edge_features]
+      ↓
+MLP
+      ↓
+Transaction Logit
+```
+
+6. **Bổ sung Sigmoid và Risk Score**
+
+Trong inference:
+
+```text
+Transaction Logit
+      ↓
+Sigmoid
+      ↓
+Risk Score từ 0 đến 1
+```
+
+Risk Score sau đó có thể được so sánh với một threshold để phân loại:
+
+```text
+0 = Normal
+1 = Fraud / Anomaly
+```
+
+Threshold cuối cùng sẽ được chọn dựa trên kết quả validation/evaluation.
+
+7. **Không đưa transaction feature trực tiếp vào GATv2Conv trong thiết kế hiện tại**
+
+PyTorch Geometric `GATv2Conv` có hỗ trợ edge features thông qua `edge_dim`.
+
+Tuy nhiên, trong kiến trúc hiện tại của đồ án, transaction/behavioral/temporal features được giữ lại để ghép với `emb_source` và `emb_destination` tại MLP prediction head.
+
+Thiết kế này giúp tách rõ:
+
+```text
+GATv2
+→ học representation và quan hệ giữa các Account
+
+MLP
+→ sử dụng Account Embeddings + Transaction Features
+→ dự đoán mức độ bất thường của Transaction
+```
+
+Đây là **quyết định thiết kế của đồ án**, không phải thay đổi thuật toán attention bên trong GATv2.
+
+## Tóm tắt khác biệt
+
+```text
+GATv2 gốc
+────────────────────────────────
+GATv2 là graph attention layer tổng quát
+→ học node representation
+→ dùng dynamic attention
+
+
+GATv2 trong đồ án
+────────────────────────────────
+Giữ nguyên GATv2Conv / dynamic attention
+        ↓
+Node = Account
+Edge = Transaction
+        ↓
+2 GATv2Conv layers
+        ↓
+Account Embeddings
+        ↓
+emb_source
++ emb_destination
++ transaction/behavioral/temporal features
+        ↓
+MLP
+        ↓
+Sigmoid
+        ↓
+Risk Score (0 - 1)
+        ↓
+Normal / Fraud-Anomaly
+```
+
+**Kết luận:** đồ án không sửa cơ chế GATv2 cốt lõi mà **áp dụng GATv2 như một graph encoder và bổ sung transaction classification head phù hợp với bài toán phát hiện giao dịch bất thường**.
