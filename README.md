@@ -410,3 +410,24 @@ Normal / Fraud-Anomaly
 ```
 
 **Kết luận:** đồ án không sửa cơ chế GATv2 cốt lõi mà **áp dụng GATv2 như một graph encoder và bổ sung transaction classification head phù hợp với bài toán phát hiện giao dịch bất thường**.
+
+
+## Phase 1: kiểm tra dataset trước khi train
+
+Plan và context bàn giao: [docs/TRAINING_PIPELINE_PLAN.md](docs/TRAINING_PIPELINE_PLAN.md).
+
+Validator dùng Python standard library, không cần cài torch, pandas, Kafka hoặc chạy database:
+
+```bash
+python3 scripts/validate_dataset.py
+python3 scripts/validate_dataset.py --data ../anomaly-data-pipeline/data/generated --output reports/dataset-validation
+python3 -m unittest discover -s tests -p 'test_dataset_validation.py' -v
+```
+
+Mặc định đường dẫn được tính từ root GATv2, không phụ thuộc working directory. Lệnh chỉ đọc dataset, tạo `validation.json` và `validation.md`; exit code 1 nếu có lỗi, 0 nếu pass hoặc pass kèm cảnh báo. Các report trong `reports/` là artifact local bị gitignore; source, test và plan cho phép tái tạo report.
+
+Kiểm tra bao gồm schema theo event type, manifest/count/SHA256, ID/label/reference, lifecycle/sequence/timezone, native transfer export và replay ledger cho cả TRANSFER/CASH_IN/CASH_OUT/PAYMENT/DEBIT. Report có phân bố ngày/tháng, amount/type/channel/status/nhãn, graph và preview split 50/30/20 theo ngày nguyên, cắt ở 00:00 timezone mô phỏng. Preview chưa tạo split files.
+
+Tập mục tiêu đã chốt là tất cả 5 nghiệp vụ. Lấy `TransferCreated`/`TransactionRequested` làm thời điểm dự đoán; label join bằng transaction ID. Không nối `transfer_events.jsonl` vào `events.jsonl` như các event độc lập vì đó là export của cùng transfer subset. Credit/loan chưa dùng làm feature ở bản đầu; loan submission có kết quả duyệt sẵn, loan snapshots chưa phải trạng thái dựng lại theo thời điểm, loan cash flow chưa nối ledger giao dịch. CASH_IN có hướng tiền từ cash counterparty vào account được ghi trong raw source. Chi tiết policy nằm trong JSON report và plan.
+
+Pass validator chỉ xác nhận contract và tính nhất quán trong phạm vi dataset schema 2; chưa xác nhận chạy backend Anomaly hoặc chất lượng model. Artifact mới phải được validate lại trước Phase 2.
