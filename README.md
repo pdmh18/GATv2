@@ -412,22 +412,66 @@ Normal / Fraud-Anomaly
 **Kết luận:** đồ án không sửa cơ chế GATv2 cốt lõi mà **áp dụng GATv2 như một graph encoder và bổ sung transaction classification head phù hợp với bài toán phát hiện giao dịch bất thường**.
 
 
-## Phase 1: kiểm tra dataset trước khi train
+## Dataset pipeline và output
 
-Plan và context bàn giao: [docs/TRAINING_PIPELINE_PLAN.md](docs/TRAINING_PIPELINE_PLAN.md).
+Context/phases: [docs/TRAINING_PIPELINE_PLAN.md](docs/TRAINING_PIPELINE_PLAN.md). Mọi artifact của pipeline dataset được gom theo phiên bản và seed:
 
-Validator dùng Python standard library, không cần cài torch, pandas, Kafka hoặc chạy database:
+```text
+outputs/
+├── contextual-v4/
+│   ├── multiseed.json
+│   ├── hour-distribution.json
+│   └── seed-20261002/        # seed-20261003, seed-20261004 tương tự
+│       ├── raw/            # JSONL nguồn + manifest generator
+│       ├── validation/     # validation.json, validation.md
+│       ├── splits/         # train/validation/test.jsonl, manifest.json, summary.md
+│       ├── baseline/       # assessment.json: rule metrics
+│       └── eda/            # PNG, PDF và eda_summary.json
+├── contextual-v3/          # phiên bản đối chiếu trước sửa giờ
+└── archive/                # thử nghiệm, output trùng và backup cũ
+```
+
+`outputs/` bị gitignore. Generator vẫn nằm ở repo cùng cấp `../anomaly-data-pipeline`; GATv2 dùng snapshot `raw/` của từng run để tránh dữ liệu mặc định của generator thay đổi làm lệch provenance. Không tự sinh lại dữ liệu khi phân tích.
+
+`configs/dataset.json` xác định run hiện hành, seed, source, validation report, split output và tỷ lệ 50/30/20. Defaults của các script đọc từ config này; đường dẫn config tính từ root GATv2, override CLI tính từ working directory.
+
+### Validator, split và baseline
 
 ```bash
 python3 scripts/validate_dataset.py
-python3 scripts/validate_dataset.py --data ../anomaly-data-pipeline/data/generated --output reports/dataset-validation
-python3 -m unittest discover -s tests -p 'test_dataset_validation.py' -v
+python3 scripts/run_pipeline.py --stage split
+python3 scripts/assess_dataset.py
+python3 scripts/check_hour_distribution.py
 ```
 
-Mặc định đường dẫn được tính từ root GATv2, không phụ thuộc working directory. Lệnh chỉ đọc dataset, tạo `validation.json` và `validation.md`; exit code 1 nếu có lỗi, 0 nếu pass hoặc pass kèm cảnh báo. Các report trong `reports/` là artifact local bị gitignore; source, test và plan cho phép tái tạo report.
+Validator chỉ cần standard library; kiểm tra contracts, label join, ledger và causal scenario witnesses. Loader kiểm tra source SHA256 và report đã pass trước khi split. Một mẫu cho mỗi TransferCreated/TransactionRequested; native transfer export không được tính thêm giao dịch. Split giữ ngày nguyên theo thời gian, không resample: với 181 ngày, train trước 2025-04-01, validation trước 2025-05-25, test trước 2025-07-01.
 
-Kiểm tra bao gồm schema theo event type, manifest/count/SHA256, ID/label/reference, lifecycle/sequence/timezone, native transfer export và replay ledger cho cả TRANSFER/CASH_IN/CASH_OUT/PAYMENT/DEBIT. Report có phân bố ngày/tháng, amount/type/channel/status/nhãn, graph và preview split 50/30/20 theo ngày nguyên, cắt ở 00:00 timezone mô phỏng. Preview chưa tạo split files.
+Split từ chối output đã tồn tại; `--overwrite` giữ bản trước ở `splits.previous-<id>` cùng seed. Split chỉ chứa request/target và metadata truy vết; terminal status, posted_at, risk, after balances, scenario/profile/identity/loan không là input model. Phase 3 cần replay source events theo thời gian để tạo lịch sử và graph. `--stage all` chưa triển khai và bị từ chối.
 
-Tập mục tiêu đã chốt là tất cả 5 nghiệp vụ. Lấy `TransferCreated`/`TransactionRequested` làm thời điểm dự đoán; label join bằng transaction ID. Không nối `transfer_events.jsonl` vào `events.jsonl` như các event độc lập vì đó là export của cùng transfer subset. Credit/loan chưa dùng làm feature ở bản đầu; loan submission có kết quả duyệt sẵn, loan snapshots chưa phải trạng thái dựng lại theo thời điểm, loan cash flow chưa nối ledger giao dịch. CASH_IN có hướng tiền từ cash counterparty vào account được ghi trong raw source. Chi tiết policy nằm trong JSON report và plan.
+Baseline score trước khi quan sát current request, dùng lịch sử qua các tập, chọn threshold trên validation rồi giữ nguyên trên test. Precision/recall/F1/AUC/AP là đánh giá các rules amount/behavior/graph, chưa phải kết quả GATv2 hoặc chứng minh dataset sát ngân hàng thực.
 
-Pass validator chỉ xác nhận contract và tính nhất quán trong phạm vi dataset schema 2; chưa xác nhận chạy backend Anomaly hoặc chất lượng model. Artifact mới phải được validate lại trước Phase 2.
+### Sinh và kiểm chứng nhiều seed
+
+Dùng environment của generator có Mimesis/Pydantic/PyYAML, chọn root mới để giữ nguyên các run đã có:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 ../anomaly-data-pipeline/.venv/bin/python scripts/check_dataset_seeds.py --output-root outputs/contextual-v4-rerun --seeds 20261002 20261003 20261004
+python3 scripts/check_hour_distribution.py --output-root outputs/contextual-v4-rerun
+```
+
+Runner thực hiện generation → validation → split → baseline, đọc YAML/TOML generator và tỷ lệ split trong config GATv2. Từ chối seed directory đã tồn tại. Các report validation và baseline có directory riêng, tổng hợp nằm ở run root.
+
+### EDA bằng Matplotlib
+
+Trong environment có Matplotlib và NumPy:
+
+```bash
+python3 scripts/plot_dataset.py
+python3 scripts/plot_dataset.py --data outputs/contextual-v4-rerun/seed-20261002/raw --validation-report outputs/contextual-v4-rerun/seed-20261002/validation/validation.json --multiseed-report outputs/contextual-v4-rerun/multiseed.json --output outputs/contextual-v4-rerun/seed-20261002/eda
+```
+
+Script kiểm tra SHA256 trước khi đọc nguồn. PNG/PDF gồm phân bố ngày/type/channel/giờ, amount/scenario, activity/failure và graph; trang baseline được ghi rõ là diagnostic rules. Normal/anomaly chuẩn hóa riêng từng class. Graph gồm cả failed requests, đảo CASH_IN thành cash → account; không phải settled graph. Histogram số request mỗi cặp dùng log10 ở trục X và thang log ở trục Y để thấy phần ít cặp hơn.
+
+Contextual-v4 dùng anomaly off-hours probability 0.35, normal 0.05; contextual amount vẫn lệch amount/profile và channel, không bắt buộc lệch giờ. Profile/labels chỉ dùng audit offline. Overlap giờ không chứng minh ngân hàng thực đã được mô phỏng đúng; funding/failure, clipping activity và cold start còn cần xử lý.
+
+Các artifact trước đã được di chuyển; `outputs/archive/migration-originals/` giữ metadata trước sửa provenance. Source JSONL và split JSONL giữ nguyên checksum. Một split amount-only cũ thiếu audit gốc được ghi rõ trong manifest, chỉ giữ làm lưu trữ; cần validator mới trước khi đánh giá lại.

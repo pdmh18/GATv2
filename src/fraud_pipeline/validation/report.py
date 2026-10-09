@@ -14,7 +14,7 @@ FEATURE_POLICY = {
     'join_only': ['event_id', 'transaction_id', 'sourceAccountId', 'destinationAccountId'],
     'excluded': ['risk', 'risk_score', 'is_anomaly', 'scenario_id', 'terminal_status', 'posted_at',
                  'sourceBalanceAfter', 'destinationBalanceAfter', 'loan_fields', 'customer_identity',
-                 'snapshot_fields_without_availability_proof'],
+                 'snapshot_fields_without_availability_proof', 'generation_behavior_profiles'],
     'label_source': 'labels.jsonl; event_id points to request; join on transaction_id',
     'history_rule': 'Strictly prior events; no current terminal event or future data; no labels in graph/state updates.',
     'graph_policy': {
@@ -24,6 +24,7 @@ FEATURE_POLICY = {
         'CASH_OUT': 'Account → cash counterparty for money-flow graph.',
         'CASH_IN': 'Cash counterparty → credited account for money-flow graph; raw source field names the credited account.',
         'note': 'Keep raw source/destination roles in the transaction classification head. Phase 3 defines tensor direction, graph window and batching.'},
+    'generation_profile_policy': 'behavior_profiles.jsonl is generator audit metadata; never feed oracle preferences or typical_amount into baseline/model.',
     'credit_policy': 'Excluded from initial features; dates checked for future data. Enable only after implementing as-of event lookup.',
     'loan_policy': 'Excluded: submission leaks outcome, snapshots describe final state and loan cash flows do not mutate transaction ledger.',
 }

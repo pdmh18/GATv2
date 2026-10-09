@@ -7,5 +7,6 @@ data/processed/*
 data/splits/*
 models/*
 reports/*
+outputs/*
 !**/.gitkeep
 .ipynb_checkpoints/

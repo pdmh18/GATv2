@@ -1,4 +1,4 @@
-"""Bước 4: Train / Validation / Test, ưu tiên chia theo thời gian để tránh data leakage."""
+"""Legacy dataframe row-count helper. Phase 2 uses split_export whole-day intervals."""
 import pandas as pd
 
 def time_split(df: pd.DataFrame, train=0.7, val=0.15):

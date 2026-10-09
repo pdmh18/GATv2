@@ -6,14 +6,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
+from fraud_pipeline.artifacts import defaults
 from fraud_pipeline.validation import validate_dataset
 from fraud_pipeline.validation.report import markdown
 
 
 def main():
+    paths = defaults()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data', type=Path, default=ROOT.parent / 'anomaly-data-pipeline/data/generated')
-    parser.add_argument('--output', type=Path, default=ROOT / 'reports/dataset-validation')
+    parser.add_argument('--data', type=Path, default=paths['source'])
+    parser.add_argument('--output', type=Path, default=paths['validation'].parent)
     args = parser.parse_args()
     if args.data.resolve() == args.output.resolve():
         parser.error('Output must differ from input directory')

@@ -3,6 +3,7 @@ from datetime import datetime, time
 from pathlib import Path
 
 from .checks import validate_tables
+from .scenarios import validate_scenarios
 from .core import Audit, integer, read_dataset, timestamp
 from .report import FEATURE_POLICY, summaries
 
@@ -23,6 +24,7 @@ def validate_dataset(root: Path):
     except (KeyError, ValueError, TypeError) as exc:
         audit.check(False, 'manifest_period', 'manifest', str(exc))
     transactions, labels, events, ledger = validate_tables(tables, manifest, audit)
+    validate_scenarios(tables, manifest, transactions, labels, audit)
     if period:
         for e in events:
             audit.check(period[0] <= timestamp(e['occurred_at']) < period[1], 'event_period', e['event_id'], 'Event outside simulation period')

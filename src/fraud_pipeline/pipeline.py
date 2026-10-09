@@ -1,12 +1,21 @@
 """Điều phối 10 bước + vòng lặp "chưa đạt -> điều chỉnh"."""
-from .config import load_config
-
-cfg = load_config()
+from .config import load_config, project_path
+from .split_export import export_splits
 
 def stage_ingest():     print("[1] Ingest: simulator -> Kafka -> EventStoreDB -> Pandas -> MongoDB")
 def stage_preprocess(): print("[2] Khảo sát & tiền xử lý")
 def stage_features():   print("[3] Feature engineering")
-def stage_split():      print("[4] Chia Train/Val/Test")
+def stage_split(config_path='configs/dataset.json', *, data=None, output=None, validation_report=None, overwrite=False):
+    cfg = load_config(config_path)
+    dataset = cfg['dataset']
+    result = export_splits(
+        project_path(dataset['source']) if data is None else data,
+        project_path(dataset['validation_report']) if validation_report is None else validation_report,
+        project_path(dataset['output']) if output is None else output,
+        cfg['split'], overwrite=overwrite)
+    for name, summary in result['splits'].items():
+        print(f"{name}: {summary['count']} samples, {summary['anomaly']} anomalies")
+    return result
 def stage_train():      print("[5] Train model")
 def stage_tune():       print("[6] Hyperparameter tuning")
 def stage_evaluate():   print("[7] Đánh giá")
@@ -23,6 +32,7 @@ STAGES = {
 
 def run_training_loop():
     """Bước 5-8, lặp lại nếu kết quả chưa đạt yêu cầu."""
+    cfg = load_config()
     for i in range(cfg["target_metrics"]["max_iterations"]):
         stage_train(); stage_tune(); stage_evaluate(); stage_compare()
         reached = True  # TODO: gọi compare.meets_target(...)
