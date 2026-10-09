@@ -4,7 +4,27 @@
     "seed": 20261002,
     "source": "outputs/contextual-v4/seed-20261002/raw",
     "validation_report": "outputs/contextual-v4/seed-20261002/validation/validation.json",
-    "output": "outputs/contextual-v4/seed-20261002/splits"
+    "output": "outputs/contextual-v4/seed-20261002/splits",
+    "features_output": "outputs/contextual-v4/seed-20261002/features"
+  },
+  "features": {
+    "request_windows_seconds": [120, 3600, 86400],
+    "amount_window_seconds": 2592000,
+    "amount_min_history": 5,
+    "include_fee": false,
+    "graph_window_seconds": 86400,
+    "neighborhood_window_seconds": 600,
+    "node_history_window_seconds": 86400,
+    "node_scaler_samples": 256,
+    "cold_start_min_requests": 20,
+    "graph_history": "settled",
+    "bidirectional_graph": true,
+    "chunk_size": 10000
+  },
+  "feature_audit": {
+    "amount_windows_days": [1, 7, 30],
+    "history_count_thresholds": [1, 5, 10, 20],
+    "graph_windows_seconds": [600, 3600, 86400, 604800]
   },
   "split": {
     "train": 0.5,

@@ -425,6 +425,7 @@ outputs/
 │       ├── raw/            # JSONL nguồn + manifest generator
 │       ├── validation/     # validation.json, validation.md
 │       ├── splits/         # train/validation/test.jsonl, manifest.json, summary.md
+│       ├── features/       # causal NumPy tensors, node mapping, preprocessing, graph timeline
 │       ├── baseline/       # assessment.json: rule metrics
 │       └── eda/            # PNG, PDF và eda_summary.json
 ├── contextual-v3/          # phiên bản đối chiếu trước sửa giờ
@@ -475,3 +476,51 @@ Script kiểm tra SHA256 trước khi đọc nguồn. PNG/PDF gồm phân bố n
 Contextual-v4 dùng anomaly off-hours probability 0.35, normal 0.05; contextual amount vẫn lệch amount/profile và channel, không bắt buộc lệch giờ. Profile/labels chỉ dùng audit offline. Overlap giờ không chứng minh ngân hàng thực đã được mô phỏng đúng; funding/failure, clipping activity và cold start còn cần xử lý.
 
 Các artifact trước đã được di chuyển; `outputs/archive/migration-originals/` giữ metadata trước sửa provenance. Source JSONL và split JSONL giữ nguyên checksum. Một split amount-only cũ thiếu audit gốc được ghi rõ trong manifest, chỉ giữ làm lưu trữ; cần validator mới trước khi đánh giá lại.
+
+### Phase 3: feature và graph causal
+
+Trong environment có NumPy, chạy từ GATv2:
+
+```bash
+python3 scripts/run_pipeline.py --stage features
+python3 scripts/check_feature_artifacts.py
+```
+
+Output mặc định `outputs/contextual-v4/seed-20261002/features/` theo `dataset.features_output`. Cửa sổ request 120s/1h/24h, median completed theo account+type 30 ngày, graph/node history 24h, neighborhood 600s và cold-start threshold nằm trong `configs/dataset.json`. Output đã tồn tại bị từ chối; `--overwrite` giữ backup `features.previous-<id>`.
+
+Feature engine replay full chronological `events.jsonl`. Các request cùng timestamp chấm trên history trước nhóm đó; sau đó mới quan sát request và terminal. Failed requests góp vào request counts/receiver novelty nhưng không vào completed amount mean hoặc settled graph. Lịch sử tiếp tục qua validation/test, không cập nhật từ label. Metadata profile/credit/loan/identity/balance không là feature.
+
+Artifact schema v2 có `transaction_features.npy` [N,35] đã scale log numeric bằng train mean/std; `preprocessing.json` và manifest ghi thứ tự cột, train fit count, cold-start/missing policy. Type/channel dùng vocabulary contract cố định có unknown bucket. Có node type one-hot nền [1041,4], node inputs tại mỗi cutoff [1041,12], `nodes.json`, timestamps, labels riêng, train/validation/test masks, raw-role target edges và money-flow target edges. ID chỉ để mapping/trace; `requests.jsonl` truy về source event line.
+
+Graph lưu timeline sparse gồm attempt/settled, type, amount và thời gian; `graph_prefix` chỉ chứa timestamp nhỏ hơn request. `TemporalDataset.context(i)` dựng graph trong `[t-window,t)`, mặc định settled, deduplicate pairs và thêm reverse edges. CASH_IN cash → account; target classifier vẫn giữ raw source/destination. Không xuất self-loops; GATv2Conv hiện có xử lý self-loops. Node inputs gồm type one-hot và 8 feature incoming/outgoing settled count, unique partners, median amount và has-history flags trong 24h. Loader tính lại tại cutoff, không giữ history đã hết hạn của node ít hoạt động. Node scaler fit trên 256 contexts train có sẵn, không dùng validation/test.
+
+```python
+from fraud_pipeline.features.dataset import TemporalDataset
+
+dataset = TemporalDataset("outputs/contextual-v4/seed-20261002/features")
+inputs = dataset.context(100)  # x, edge_index, target_edge_index, edge_features
+label = dataset.arrays["labels"][100]  # target riêng, không có trong inputs
+```
+
+Loader chưa chuyển sang Torch. Phase 4 phải giữ graph context đúng từng cutoff; không ghép request có timestamp khác nhau vào một graph muộn hơn. `check_feature_artifacts.py` xác minh checksum, shape, mask, mọi graph cutoff và sample contexts; report nằm ở `validation/features.json`. Chưa train GATv2; các module dataframe cũ không được gọi trong luồng Phase 3 này.
+
+### Đối chiếu feature/window với dataset trước khi train
+
+```bash
+python3 scripts/analyze_feature_suitability.py
+```
+
+Environment cần NumPy/Matplotlib. Output `analysis/feature-suitability/` cùng seed gồm JSON, diagnostic arrays, PNG và PDF. Audit replay lịch sử hoàn tất theo account và account+type ở 1/7/30 ngày, mean/median, độ phủ settled bidirectional graph và phân bố feature. Options nằm trong `feature_audit` của JSON config. Train support dùng để đề xuất sửa input; held-out chỉ là diagnostics.
+
+**Audit trước revision:** 7d cùng type chưa đủ support cho nhiều request, 600s graph cô lập đa số source và type-only node features hạn chế GATv2 phân biệt account. Candidates: median account+type 30d với relative amount/support flags, message-passing graph 24h tách 600s scalar features, bổ sung node-specific causal history. Revision đã thực hiện ở schema v2, xem mục 16 trong plan; chưa train hoặc khẳng định tăng hiệu quả.
+
+
+Revision đã xuất lại seed chính: 35 transaction features, 12 node input features. `log_fee` bị loại khỏi active input do constant; source contract vẫn giữ fee. Amount reference dùng median 30d theo account+type, `amount_min_history=5`: relative amount chỉ xuất khi đủ mẫu; thiếu thì zero cùng cờ reliability, median/count quan sát vẫn giữ. Không lọc history bằng label. Node features tính từ settled money-flow timeline; scaler log numeric của node fit trên available known nodes ở sampled train contexts, flags/type không scale. `node_features.npy` chỉ lưu static one-hot, phần dynamic được reconstruct qua loader.
+
+Kiểm tra model thật trên CPU trong environment có Torch/PyG:
+
+```bash
+python3 scripts/check_model_inputs.py
+```
+
+Lệnh chỉ forward/backward hai train rows, derive dimensions từ schema, không optimizer step và không tính evaluation metrics. Report `validation/model-inputs.json` ghi versions đã kiểm tra. Graph 24h lớn hơn bản trước: audit samples đạt tối đa 7.638 directed edges; chi phí replay/node reconstruction/batching cần benchmark ở Phase 4.

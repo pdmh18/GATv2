@@ -17,4 +17,4 @@ def defaults():
 
 def seed_paths(run_root, seed):
     root = Path(run_root) / f'seed-{seed}'
-    return {name: root / name for name in ('raw', 'splits', 'validation', 'baseline', 'eda')}
+    return {name: root / name for name in ('raw', 'splits', 'validation', 'features', 'baseline', 'eda')}

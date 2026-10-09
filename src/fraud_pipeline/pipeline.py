@@ -4,7 +4,19 @@ from .split_export import export_splits
 
 def stage_ingest():     print("[1] Ingest: simulator -> Kafka -> EventStoreDB -> Pandas -> MongoDB")
 def stage_preprocess(): print("[2] Khảo sát & tiền xử lý")
-def stage_features():   print("[3] Feature engineering")
+def stage_features(config_path='configs/dataset.json', *, data=None, output=None, validation_report=None, overwrite=False):
+    from .features.export import export_features
+    cfg = load_config(config_path)
+    dataset = cfg['dataset']
+    result = export_features(
+        project_path(dataset['source']) if data is None else data,
+        project_path(dataset['validation_report']) if validation_report is None else validation_report,
+        project_path(dataset['output']),
+        project_path(dataset['features_output']) if output is None else output,
+        cfg['features'], overwrite=overwrite)
+    print(f"Features: {result['request_count']} requests, {result['node_count']} nodes, "
+          f"{len(result['feature_names'])} transaction features, {result['graph_event_count']} graph events")
+    return result
 def stage_split(config_path='configs/dataset.json', *, data=None, output=None, validation_report=None, overwrite=False):
     cfg = load_config(config_path)
     dataset = cfg['dataset']

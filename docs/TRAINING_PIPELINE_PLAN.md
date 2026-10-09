@@ -1,6 +1,6 @@
 # Kế hoạch pipeline train GATv2 phục vụ Anomaly
 
-Cập nhật: 2026-10-09. Tài liệu bàn giao context và theo dõi các phase; các mục chưa đánh dấu vẫn là công việc dự kiến.
+Cập nhật: 2026-10-10. Tài liệu bàn giao context và theo dõi các phase; các mục chưa đánh dấu vẫn là công việc dự kiến.
 
 ## 1. Mục tiêu và phạm vi
 
@@ -25,7 +25,7 @@ Dataset JSONL + manifest + labels
   → tích hợp canonical event của Anomaly
 ```
 
-Ưu tiên hoàn thành từng phase và kiểm chứng đầu ra trước khi chuyển tiếp. Hiện tập trung dữ liệu; chưa triển khai training hoặc realtime.
+Ưu tiên hoàn thành từng phase và kiểm chứng đầu ra trước khi chuyển tiếp. Phase 3 revision hoàn tất trên seed chính với schema v2 sau đối chiếu mục 15 và kiểm chứng mục 16. Task tiếp theo là Phase 4; chưa train.
 
 ## 2. Các quyết định đã thống nhất
 
@@ -119,15 +119,21 @@ Event transfer hỗ trợ `TransferCreated`, `TransferOTPUpdated`, `TransferComp
 
 Đầu ra: train/validation/test có thể tái lập, không overlap transaction, sắp đúng thời gian. Hoàn thành khi mọi dòng có nguồn event và label rõ ràng, cả ba tập có thống kê và đủ dữ liệu để đánh giá.
 
-### Phase 3 — Feature và graph theo thời gian
+### Phase 3 — Feature và graph theo thời gian (revision hoàn tất ở seed chính)
 
-- [ ] Feature giao dịch: amount/log amount, fee, type, channel, calendar/time.
-- [ ] Feature lịch sử: count 1h/24h, mean amount 7 ngày, thời gian từ giao dịch trước, người nhận mới; xác định rõ request/completed nào góp vào từng feature.
-- [ ] Feature tại t chỉ dùng thông tin trước t; với event cùng timestamp, dùng thứ tự lifecycle được xác định. Không dùng kết quả giao dịch đang chấm.
-- [ ] Fit preprocessing trên train; xử lý category/node chưa gặp và missing thống nhất.
-- [ ] Mapping node/type; graph lịch sử, node features, target edges, edge features, labels và masks.
-- [ ] Chốt chiều edge, CASH_IN/cash counterparty, self-loop, cửa sổ graph và chiến lược snapshot/batching.
-- [ ] Cho phép lịch sử đã quan sát trong validation/test cập nhật context theo replay; không dùng label để cập nhật representation hoặc gradient.
+- [x] Feature giao dịch: amount/log amount, fee, type, channel, calendar/time.
+- [x] Feature lịch sử: count 1h/24h, median amount 7 ngày, thời gian từ giao dịch trước, người nhận mới; xác định rõ request/completed nào góp vào từng feature.
+- [x] Feature tại t chỉ dùng thông tin trước t; với event cùng timestamp, dùng thứ tự lifecycle được xác định. Không dùng kết quả giao dịch đang chấm.
+- [x] Fit preprocessing trên train; xử lý category/node chưa gặp và missing thống nhất.
+- [x] Mapping node/type; graph lịch sử, node features, target edges, edge features, labels và masks.
+- [x] Chốt chiều edge, CASH_IN/cash counterparty, self-loop, cửa sổ graph và chiến lược snapshot/batching.
+- [x] Cho phép lịch sử đã quan sát trong validation/test cập nhật context theo replay; không dùng label để cập nhật representation hoặc gradient.
+
+- [x] Đối chiếu độ phủ 1/7/30 ngày, mean/median và graph context với dataset thực của run (mục 15).
+- [x] Chốt/triển khai median cùng account+type, amount-relative và support/cold-start flags từ kết quả audit.
+- [x] Tách window graph message passing khỏi window short-term burst/fan-in/forwarding.
+- [x] Bổ sung node features causal khác nhau giữa account; derive model dimensions từ schema.
+- [x] Xuất lại tensors, kiểm tra no-future/label invariance và Torch/PyG shape compatibility sau sửa.
 
 Đầu ra: graph/tensor dataset cùng feature schema và preprocessing artifact. Hoàn thành khi shape/ID alignment đúng và kiểm tra thêm dữ liệu tương lai không làm đổi feature/prediction context của quá khứ.
 
@@ -169,7 +175,7 @@ Event transfer hỗ trợ `TransferCreated`, `TransferOTPUpdated`, `TransferComp
 
 ## 5. Công việc tiếp theo và quy tắc bàn giao
 
-**Task tiếp theo: Phase 3 — chốt feature availability, history replay và graph/tensor theo thời gian.** Chưa làm training/tuning/realtime trong task này. Đọc source generator, event contracts và manifest hiện tại trước khi triển khai; không chỉ dựa vào con số trong tài liệu.
+**Task tiếp theo: Phase 4 — trainer và causal batching trên artifact schema v2.** Revision ở mục 16 đã kiểm chứng kỹ thuật và CPU model compatibility, chưa chứng minh chất lượng dự đoán. Derive dimensions từ schema, benchmark chi phí context/node reconstruction và giữ held-out test cho đánh giá cuối. Funding/activity vẫn là giới hạn dataset.
 
 Khi bàn giao phase, cập nhật checkbox, file/command đã thay đổi, lệnh kiểm tra và kết quả, giới hạn chưa kiểm chứng, cùng task tiếp theo. Chỉ đánh dấu hoàn thành khi đầu ra thực có thể chạy/kiểm tra; không coi scaffold hay thông báo stage là pipeline đã hoạt động.
 
@@ -380,3 +386,100 @@ Kiểm tra: 36 unittest GATv2 liên quan và 3 unittest generator pass; diff whi
 Runner mới nhận `--output-root` thay ba roots rời nhau; ví dụ `outputs/contextual-v4-rerun`. CLI của validator/EDA/baseline vẫn có override source/report/output; đường dẫn defaults tính từ project root. README có cây output và lệnh mới. `outputs/` bị gitignore; không lưu dataset vào git.
 
 Histogram request mỗi cặp được chỉnh trục Y sang log và bổ sung panel chỉ chứa cặp có ≥2 requests để thấy phần đuôi. Trục X vẫn log10(request count), trục Y là số cặp; cột singleton cao không phải model score thấp hoặc thiếu giao dịch. EDA hiện hành ở `outputs/contextual-v4/seed-20261002/eda/`.
+
+## 14. Bàn giao Phase 3 (2026-10-10)
+
+Đã triển khai `features/causal.py`, `features/export.py`, `features/dataset.py`, stage `features` và `scripts/check_feature_artifacts.py`. Không dùng behavioral dataframe `groupby` toàn kỳ; các scaffold cũ không tham gia luồng này. Window/policy/output nằm trong JSON config, không hardcode nghiệp vụ trong runner.
+
+Availability: request tại t chỉ dùng timestamp < t. Mọi request cùng timestamp dùng pre-group history, không phụ thuộc terminal serialization order. Quan sát request và terminal sau chấm cả nhóm; lifecycle cùng timestamp có hiệu lực cho request ở timestamp sau. Đây là policy bảo thủ tránh current/future settlement. Hour/weekday theo timezone của simulation manifest.
+
+34 cột: log amount/fee; sin/cos giờ và weekday, weekend; request counts 120s/1h/24h; tổng lịch sử/time-since-last và has_previous; completed amount mean/count 7 ngày và missing flag; receiver novelty; tỷ lệ channel/hour đã quan sát; transfer-attempt unique incoming sources của raw source/destination trong 600s; incoming settled transfer amount và outgoing transfer-attempt count; cold-start flag; type/channel one-hot contract vocabulary + unknown. Mean completed tính tất cả nghiệp vụ đã hoàn tất của source, không phải số dư hay feature label. Failed requests tính vào request history nhưng không completed mean; graph mode settled loại failed attempts.
+
+Numeric columns có prefix log_ fit mean/std trên train, constant scale=1; categorical/sin/cos/flags giữ nguyên. Missing history dùng zero với explicit flags, không đọc generation profile để điền. Schema/thứ tự cột nằm trong manifest, preprocessing parameters ở `preprocessing.json`; source/input/code/output checksums lưu để truy vết.
+
+Nodes: unknown bucket + account/merchant/cash, static type one-hot 4 chiều, created_at gate availability. Raw target edges giữ source/destination cho classifier; money-flow edges đảo CASH_IN. Graph timeline gồm request attempt và successful terminal cùng type/log amount/time; settled/attempts/both cấu hình được. Context `[t-600s,t)` chọn theo prefix, deduplicate directed pairs và mặc định thêm reverse edges. Không thêm self-loops trong artifact; GATv2Conv hiện có làm việc đó. Graph attributes lưu để audit/extension, kiến trúc GATv2 hiện không đưa chúng vào attention. Đặc trưng lịch sử nằm ở transaction head, node features ban đầu chỉ là type.
+
+Batching: timeline + prefix tránh sao chép toàn bộ graph mỗi request. `TemporalDataset.context(i)` trả input của đúng cutoff, labels/masks riêng. Phase 4 phải giữ context của từng request hoặc dùng snapshot bảo thủ hơn; không dùng snapshot tương lai để batch. Đây là artifact NumPy độc lập Torch; chưa benchmark tốc độ training/sampling.
+
+Đã chạy trên contextual-v4 seed 20261002, 500.000 requests: transaction features [500000,34], node features [1041,4], target edges [2,500000], graph timeline 999.513 events. Mask counts train 251.481, validation 148.653, test 99.866; scaler fit 251.481 train rows. Output `outputs/contextual-v4/seed-20261002/features/` khoảng 213 MiB; first export giữ bằng `.previous-*` sau khi bổ sung metadata.
+
+Kiểm chứng: 11 test Phase 3 pass (future/label invariance, same timestamp/current terminal exclusion, failed request vs completion, window expiry, timezone equivalence, scaler train-only, held-out changes không đổi train contexts, cash direction/graph shape/mask, checksum corruption, refusal overwrite). 36 test validator/split/baseline pass. Artifact audit pass: checksum tất cả file, node bounds, finite values, masks, graph-prefix strict cutoff cho toàn bộ 500k; load 1.001 contexts, số graph edges 0–190 ở samples. Report `outputs/contextual-v4/seed-20261002/validation/features.json`.
+
+Commands trong Python environment có NumPy:
+
+```bash
+python3 scripts/run_pipeline.py --stage features
+python3 scripts/check_feature_artifacts.py
+python3 -m unittest discover -s tests -p 'test_causal_features.py'
+```
+
+Output đã có: dùng root khác hoặc `--overwrite` có backup. Phase 3 chỉ chạy seed chính; không tuyên bố tensor exports cả ba seed. Funding/activity vẫn là giới hạn của dataset và node features chỉ mã hóa type. **Task tiếp theo: Phase 4 — trainer thật, Torch conversion, causal batching, loss/optimizer và checkpoint bằng train; validation chọn threshold, test giữ cho đánh giá cuối.** Không dùng `model.fit()` scaffold hoặc graph cuối kỳ.
+
+## 15. Đối chiếu dataset và xét lại Phase 3 (2026-10-10)
+
+Mục này thay kết luận chuyển Phase 4 ở mục 14: kỹ thuật causal export đúng nhưng input chưa phù hợp đủ với dữ liệu/model. User yêu cầu phân tích trước khi sửa; lượt này không đổi generator, feature engine hoặc GATv2. Đã replay 500.000 requests của seed chính, đúng source SHA256/feature artifact. Quyết định dựa trên độ phủ train và contract model; validation/test chỉ mô tả ổn định. Chưa train hay chọn window theo F1/test labels.
+
+Artifacts ở `outputs/contextual-v4/seed-20261002/analysis/feature-suitability/`: `analysis.json`, `diagnostic_arrays.npz`, hai PNG và PDF `feature_suitability.pdf`. Script tái tạo `scripts/analyze_feature_suitability.py`, audit options trong `configs/dataset.json.feature_audit`. Candidate windows amount 1/7/30 ngày và settled graph 600s/1h/24h/7 ngày. Cùng timestamp chấm trước quan sát terminal; history gồm mọi completed transaction đã quan sát, không lọc bằng normal labels.
+
+### Amount/history support
+
+Fraction requests train có ít nhất 5 completed giao dịch cùng account+type:
+
+| Nghiệp vụ | 7 ngày | 30 ngày |
+|---|---:|---:|
+| TRANSFER | 69,1% | 93,2% |
+| CASH_IN | 51,3% | 89,5% |
+| CASH_OUT | 25,1% | 78,5% |
+| PAYMENT | 65,1% | 92,2% |
+| DEBIT | 18,4% | 72,6% |
+| Tất cả requests | 54,2% | 88,4% |
+
+History cùng type median count là 1 / 5 / 18 ở window 1 / 7 / 30 ngày. 30 ngày đạt ≥10 mẫu cho 73,8% requests train; ngưỡng 5 chỉ minh họa support, không chứng minh estimate đã chính xác thống kê. Không thể dùng min-history toàn account=20 để thay thế support cùng nghiệp vụ. Các type ít hoạt động cần count/missing/reliability flags và fallback được xác định, không lấp bằng oracle profile hoặc số liệu toàn kỳ.
+
+Trên cùng 136.328 train requests có ≥5 history cùng type trong 7 ngày, mean >2×median ở 23,6% khi gộp nghiệp vụ và 7,6% khi dùng đúng nghiệp vụ. Gộp CASH_IN với spending làm tham chiếu khó diễn giải; mean vẫn có đuôi lớn ngay trong CASH_IN do lịch nhận tiền định kỳ và top-up khác nhau. Median robust hơn với outliers, nhưng tỷ lệ cao không tự chứng minh anomaly: khoản thu lớn hợp lệ vẫn có thể vượt median. `all_history_has_cash_in_fraction` là có bất kỳ CASH_IN, không phải đã nhận salary riêng. Phân tích này không tách salary bằng oracle metadata.
+
+Đề xuất input revision: giữ log amount tuyệt đối và scaler train-only; thay tham chiếu mean gộp type bằng median completed amount của account+type trong 30 ngày, thêm relative amount và support/has-history flags. Có thể giữ 7 ngày như nhánh ngắn nếu đủ support; không xem 7/30 ngày là ngưỡng tối ưu đã được benchmark. Calendar theo tháng là candidate để đánh giá riêng cho CASH_IN định kỳ, không đọc payday/profile của generator.
+
+### Graph và độ phù hợp với GATv2
+
+Settled graph, bidirectional như config hiện tại; tỷ lệ cô lập tại mỗi request train:
+
+| Window | Source không có hàng xóm | Cả hai đầu không có hàng xóm |
+|---|---:|---:|
+| 600 giây | 93,4% | 65,8% |
+| 1 giờ | 71,9% | 24,5% |
+| 24 giờ | 4,1% | 0,15% |
+| 7 ngày | 0,28% | 0,05% |
+
+Validation/test có cùng hiện tượng: source cô lập khoảng 93,5–93,8% ở 600s, khoảng 3,8–4,0% ở 24h. Nối graph đủ dày không tự bảo đảm học tốt; 7d tăng phạm vi/shared counterparty hubs và chi phí. Candidate 24h cân bằng support hơn cho message passing, cần đo chi phí và ablation ở Phase 4. Giữ 120s request velocity và 600s transfer-neighborhood làm features MLP cho scenario ngắn; không đồng nhất window scalar với graph encoder window.
+
+GATv2 hiện `encode(x, edge_index)` rồi ghép `[h_src,h_dst,transaction_features]` ở MLP; edge attributes bị bỏ trong encoder. Không kỳ vọng amount/type trên graph timeline được attention sử dụng khi code chưa truyền chúng vào GATv2Conv. Node input hiện chỉ one-hot type: mọi account bắt đầu bằng cùng vector. 95,7% source train có vùng 2-hop chỉ một loại node (bao gồm cô lập); riêng TRANSFER có kết nối, 48,1% requests có cả hai vùng 2-hop đồng loại.
+
+Với đầu vào đồng nhất, shared transforms và normalized weighted aggregation trong attention không bảo đảm phân biệt account chỉ từ số hàng xóm; vùng đồng nhất có thể cho embedding giống nhau. Đây là nhận xét kiến trúc, chưa phải kết quả runtime hoặc model đã train. Cần bổ sung node-specific causal incoming/outgoing activity, amount/history support và degree vào x; cập nhật toàn bộ node features tại cutoff đúng, kể cả window decay của node không vừa phát event. Không dùng ID như biến liên tục, learned profile oracle hoặc labels để làm khác node.
+
+Giữ thiết kế encoder+transaction classifier hiện có, derive `in_dim`/`edge_dim` từ artifact schema; input shapes `[V,F_node]`, `[2,E_history]`, `[2,N_target]`, `[N_target,F_tx]`. Re-export/test loader cần bỏ hardcode node dimension=4 khi schema mới thêm behavioral columns. Graph attributes hiện là audit/extension metadata, không yêu cầu sửa attention hoặc đổi kiến trúc trong revision này.
+
+### Feature thưa/constant và việc còn lại
+
+- `log_fee`, unknown type/channel không đổi trên train. Fee không có tín hiệu trong generator hiện tại; có thể loại khỏi active input nhưng giữ raw contract. Unknown buckets vẫn cần để xử lý contract/serving, không coi zero-on-train là lý do bỏ chúng.
+- Request-count 120s bằng 0 ở 98,1% train, nhưng nonzero ở 1,26% normal và 31,75% anomaly train. Fan-in destination count nonzero 0,57% normal và 25,33% anomaly. Đây là descriptive diagnostics, không F1 hay bằng chứng real-bank; không loại short-term features chỉ vì sparse.
+- Cold-start/window đủ support cần flags theo account+type, không chỉ tổng count. Tất cả history vẫn gồm dữ liệu prior chưa biết nhãn; median không được tính trên tập normal đã lọc.
+- Hoàn thành revision: personal median/relative amount → dynamic node inputs → separate message-passing/scalar windows → re-export, no-future/label tests, tensor shape smoke test trên model thật. Chưa được đánh dấu lại Phase 3 hoàn tất chỉ vì tensor chạy được.
+
+Hai test của audit History/Graph pass (duplicates/median, boundary expiry và repeated reverse-pair expiry), script compile và whitespace checks pass; các hình đã xem trực tiếp. Phạm vi số liệu là seed chính, chưa audit support trên các seed còn lại. Dataset funding/activity vẫn chưa được hiệu chỉnh.
+
+## 16. Bàn giao revision Phase 3 — schema v2 (2026-10-10)
+
+User đã đồng ý triển khai sau audit. Không đổi generator hay GATv2 architecture. Config thêm `amount_min_history=5`, `include_fee=false`, amount window 30d, message-passing graph 24h, node history 24h và scalar neighborhood window riêng 600s. Cold-start overall=20 vẫn là một flag khác với reference reliability cùng nghiệp vụ.
+
+Transaction features [500000,35]: thay completed mean gộp type bằng median completed theo source+type; count và has-history cùng scope; thêm log(1+amount/median) và reliability flag. Relative amount=0 khi dưới 5 history, cùng reliability=0; vẫn giữ median/count đã quan sát để không giả vờ đây là reference đủ tin cậy. `log_amount` và scaler train-only giữ nguyên; bỏ fee khỏi active input do constant, không đổi raw/event contract. Unknown type/channel buckets giữ nguyên. Median history gồm prior completed cả normal/anomaly chưa biết nhãn, không dùng oracle profile.
+
+Node inputs tại cutoff [1041,12]: type one-hot 4 + 8 dynamic columns: incoming/outgoing settled counts, unique incoming/outgoing partners, median incoming/outgoing amount và has-incoming/has-outgoing flags. Window 24h, CASH_IN theo money-flow orientation. Reconstruct trực tiếp từ graph timeline `[t-window,t)` nên cả node không vừa phát event cũng expire đúng; không stale snapshot, không current terminal. Static `node_features.npy` [1041,4] chỉ là nền, `TemporalDataset.context(i)` ghép dynamic columns và scale. Dynamic numeric scaler fit 256 evenly spaced train cutoffs × available known nodes; flags/type không scale, unknown bucket không tham gia fit. Params/indices ở `node_preprocessing.json`.
+
+Sparse timeline không đổi 999.513 events; graph context chọn settled 24h, deduplicate và thêm reverse edges. Scalar velocity/fan-in/forwarding vẫn dùng windows ngắn. Labels/masks/input shape alignment không đổi. Schema v1 backups vẫn load được, schema v2 có dynamic context. Source/splits giữ nguyên SHA256; export có provenance/code/checksum và backup bản trước. Analytical report mục 15 giữ như evidence cho input cũ; không diễn giải nó thành kết quả input mới.
+
+Đã export seed chính contextual-v4: 500.000 requests, 35 transaction dimensions, 12 node dimensions, 1.041 nodes. 15 tests causal/tensor pass, 36 validation/split/baseline tests và 2 audit tests pass (53 tổng). Test mới kiểm tra median không bị salary/other type trộn, outlier, low-support ratio flag, short neighborhood không đổi khi graph dài, node vectors khác nhau và inactive node expiry; held-out amount/labels không đổi train feature/node/context. Artifact audit kiểm tra toàn bộ prefix/masks/checksum/finite values, load 1.001 contexts: graph edges 0–7.638, source cô lập khoảng 4,6%; unique account input vectors 1–1.000 tùy context, first cold-start có thể giống nhau.
+
+Đã chạy model thật CPU: Torch 2.14.1+cpu, PyG 2.8.0.post1; GATv2 derive `in_dim=12`, `edge_dim=35`, forward output [1] và finite gradients trên train rows 0 và 251480. Không optimizer update, không model training hoặc F1; report `validation/model-inputs.json`. Dependencies dùng temporary uv environment, chưa khóa training environment cho Phase 4. `check_model_inputs.py` tái tạo smoke check.
+
+Feature/model illustration scripts cập nhật để mô tả median, node histories và dimensions mới. Task tiếp theo Phase 4 vẫn phải benchmark context reconstruction/caching và causal batching; graph 24h đủ support hơn nhưng lớn hơn nhiều. Không dùng shared later snapshot cho request sớm, không tuyên bố GATv2 tốt hơn tabular trước ablation. Funding/activity và rủi ro legitimate CASH_IN lớn vẫn cần đánh giá; median ratio riêng không là luật gắn nhãn anomaly.
