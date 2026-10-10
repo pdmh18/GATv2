@@ -25,7 +25,7 @@ Dataset JSONL + manifest + labels
   → tích hợp canonical event của Anomaly
 ```
 
-Ưu tiên hoàn thành từng phase và kiểm chứng đầu ra trước khi chuyển tiếp. Phase 3 revision hoàn tất trên seed chính với schema v2 sau đối chiếu mục 15 và kiểm chứng mục 16. Task tiếp theo là Phase 4; chưa train.
+Ưu tiên hoàn thành từng phase và kiểm chứng đầu ra trước khi chuyển tiếp. Phase 4 đã train thật trên seed chính, 3 epoch CPU, checkpoint load lại khớp dự đoán. Phase 5 đã hoàn thành so sánh, freeze threshold trên validation và đánh giá test; xem mục 18. Task tiếp theo Phase 6.
 
 ## 2. Các quyết định đã thống nhất
 
@@ -139,19 +139,19 @@ Event transfer hỗ trợ `TransferCreated`, `TransferOTPUpdated`, `TransferComp
 
 ### Phase 4 — Train cơ bản
 
-- [ ] Vòng train PyTorch, binary loss trên logits, optimizer, device và seed.
-- [ ] Xử lý imbalance chỉ dựa trên train; cấu hình hyperparameter và batch/snapshot strategy.
-- [ ] Validation mỗi epoch, early stopping, checkpoint tốt nhất và log metrics.
-- [ ] Nối stage thành một lệnh từ dataset đến checkpoint; không dùng vòng lặp đạt mục tiêu giả.
+- [x] Vòng train PyTorch, binary loss trên logits, optimizer, device và seed.
+- [x] Xử lý imbalance chỉ dựa trên train; cấu hình hyperparameter và batch/snapshot strategy.
+- [x] Validation mỗi epoch, early stopping, checkpoint tốt nhất và log metrics.
+- [x] Nối stage thành một lệnh từ dataset đến checkpoint; không dùng vòng lặp đạt mục tiêu giả.
 
 Đầu ra: run directory có config, dataset/split metadata, learning curves và checkpoint. Hoàn thành khi train thật chạy được, loss/gradient hợp lệ và checkpoint load lại được.
 
 ### Phase 5 — Đánh giá, baseline và tuning
 
-- [ ] Baseline amount/rule và model tabular với cùng split, feature thời điểm và ngân sách đánh giá.
-- [ ] Precision, recall, F1, ROC-AUC, PR-AUC, confusion matrix và phân tích theo scenario/type/thời gian.
-- [ ] Chọn threshold trên validation; tuning xong mới chạy đánh giá test cuối.
-- [ ] Báo cáo chi phí inference và kiểm tra lợi ích graph so với baseline.
+- [x] Baseline amount/rule và model tabular với cùng split, feature thời điểm và ngân sách đánh giá.
+- [x] Precision, recall, F1, ROC-AUC, PR-AUC, confusion matrix và phân tích theo scenario/type/thời gian.
+- [x] Chọn threshold trên validation; tuning xong mới chạy đánh giá test cuối.
+- [x] Báo cáo chi phí inference và kiểm tra lợi ích graph so với baseline.
 
 Đầu ra: báo cáo so sánh, model config và threshold được chọn. Hoàn thành khi kết quả truy vết được và nêu rõ giới hạn nhãn tổng hợp; không coi đạt F1/AUC cố định là đủ để tích hợp.
 
@@ -175,7 +175,7 @@ Event transfer hỗ trợ `TransferCreated`, `TransferOTPUpdated`, `TransferComp
 
 ## 5. Công việc tiếp theo và quy tắc bàn giao
 
-**Task tiếp theo: Phase 4 — trainer và causal batching trên artifact schema v2.** Revision ở mục 16 đã kiểm chứng kỹ thuật và CPU model compatibility, chưa chứng minh chất lượng dự đoán. Derive dimensions từ schema, benchmark chi phí context/node reconstruction và giữ held-out test cho đánh giá cuối. Funding/activity vẫn là giới hạn dataset.
+**Task tiếp theo: Phase 6 — đóng gói và inference offline.** Phase 5 ở mục 18 đã chốt model/threshold trên validation rồi mới đánh giá test. Chưa có bằng chứng GAT vượt baseline; cần giữ MLP làm đối chứng trong nghiên cứu tiếp theo.
 
 Khi bàn giao phase, cập nhật checkbox, file/command đã thay đổi, lệnh kiểm tra và kết quả, giới hạn chưa kiểm chứng, cùng task tiếp theo. Chỉ đánh dấu hoàn thành khi đầu ra thực có thể chạy/kiểm tra; không coi scaffold hay thông báo stage là pipeline đã hoạt động.
 
@@ -483,3 +483,78 @@ Sparse timeline không đổi 999.513 events; graph context chọn settled 24h, 
 Đã chạy model thật CPU: Torch 2.14.1+cpu, PyG 2.8.0.post1; GATv2 derive `in_dim=12`, `edge_dim=35`, forward output [1] và finite gradients trên train rows 0 và 251480. Không optimizer update, không model training hoặc F1; report `validation/model-inputs.json`. Dependencies dùng temporary uv environment, chưa khóa training environment cho Phase 4. `check_model_inputs.py` tái tạo smoke check.
 
 Feature/model illustration scripts cập nhật để mô tả median, node histories và dimensions mới. Task tiếp theo Phase 4 vẫn phải benchmark context reconstruction/caching và causal batching; graph 24h đủ support hơn nhưng lớn hơn nhiều. Không dùng shared later snapshot cho request sớm, không tuyên bố GATv2 tốt hơn tabular trước ablation. Funding/activity và rủi ro legitimate CASH_IN lớn vẫn cần đánh giá; median ratio riêng không là luật gắn nhãn anomaly.
+
+## 17. Bàn giao Phase 4 (2026-10-10)
+
+Đã thay `model.fit()` scaffold bằng trainer PyTorch thật; thêm `models/batching.py`, checkpoint registry, stage train và end-to-end `--stage all` cho validated raw → splits → features → checkpoint. Không sửa generator hoặc feature tensors. Pipeline reuse artifact theo source/split/policy/code checksum, từ chối stale hoặc run output đã có. Overwrite giữ backup; không fake loop đạt target metrics.
+
+Config training ở dataset JSON: CPU, seed 42, một thread, 3 epochs, hidden 32/4 heads/2 layers/dropout 0,2; AdamW lr=0,001, wd=0,0001, gradient clip=1; batch max128, snapshot3600s. BCEWithLogitsLoss pos_weight=246479/5002=49,276 chỉ từ train. Early-stopping patience2/min_delta0,0001 theo weighted validation loss; run đủ3 epochs nên chưa trigger early stop. Dimensions derive schema: in_dim12, edge_dim35. Không đổi GATv2 encoder+MLP.
+
+Snapshot/cache policy: context tại request đầu bucket thời gian 1h, dùng graph/node snapshot đó cho microbatches còn lại. Cutoff không muộn hơn request; current/next terminal không lọt vào graph. Transaction features exact tại mỗi request. New node sau cutoff map unknown tới refresh sau. Đây là snapshot bảo thủ, bỏ recent graph changes trong cùng giờ; không tuyên bố tương đương graph exact. Cache identity theo feature manifest/policy, mỗi npz có checksum và không chứa label. Train/validation groups tách nhau, test split bị batching từ chối.
+
+Run `outputs/contextual-v4/seed-20261002/training/gatv2-v1/`: 251.481 train rows, 148.653 validation rows, 3.456 contexts cache, train3128 và val1857 microbatches/epoch. Khoảng179,9s CPU tổng gồm warm-cache và best-checkpoint reload validation; output khoảng403 MiB. Warm epoch1 train76,3s/val35,7s; cached epoch2 train25,7s/val5,8s. Timing trên máy hiện tại, không phải production latency hoặc phép đo exact per-request graph.
+
+| Epoch | Train weighted loss | Validation weighted loss | Validation F1 @0,5 | Validation AP |
+|---|---:|---:|---:|---:|
+| 1 | 0,19349 | 0,04632 | 0,85640 | 0,97277 |
+| 2 | 0,06081 | 0,03732 | 0,89029 | 0,98155 |
+| 3 | 0,05373 | 0,03871 | 0,92749 | 0,98466 |
+
+Best checkpoint epoch2 theo loss rule trước khi chạy, không chọn lại bằng F1/AP sau nhìn kết quả. Precision0,80863, recall0,99030, ROC-AUC0,99968; TP2962/FP701/FN29/TN144961. Threshold0,5 chưa tune; weighted-loss sigmoid score chưa calibration. Không so trực tiếp với baseline test F1 ở mục cũ và không suy ra lợi ích graph từ score validation cao.
+
+Output có config/provenance, copy feature schema/preprocessing/mapping, `best.pt`/`last.pt` (model và optimizer state), learning curves, epoch history, best validation predictions và summary. Checkpoint load `weights_only=True`, strict state/schema identity; best checkpoint được load lại và dự đoán validation khớp bản lưu. Source/feature files đã xác minh trước/sau; test không được evaluate.
+
+Kiểm tra: 4 training tests pass (first-cutoff/microbatch reuse, unknown new node, rejection test split, cache identity/corruption, real optimizer/checkpoint round-trip, fixed-seed repeat, end-to-end reuse/stale policy rejection). Cùng 53 test trước =57 test liên quan pass; compile/diff checks và Make dry-run pass. Big run dùng `--stage train`; end-to-end orchestration đã chạy trên hand-built fixture, không sinh lại source500k. Learning curve đã xem trực tiếp.
+
+Direct CPU dependencies pin ở `requirements-training.txt`, versions đúng runtime đã kiểm tra; uv recipe có explicit CPU index. Chưa có full transitive lockfile. Make có `setup-training`, `train`, `all` và CONFIG/PYTHON overrides. Không đánh giá GPU/runtime Anomaly/inference; chạy offline CPU duy nhất seed chính.
+
+**Task tiếp theo Phase 5:** baseline tabular/MLP cùng feature/split và budget; ablation node/graph và snapshot lag; chọn threshold trên validation, phân tích theo type/scenario/time, giữ test tới khi chốt cấu hình. Dataset synthetic shortcuts/funding/activity còn giới hạn; validation AP cao chưa là bằng chứng generalization thực tế.
+
+
+## 18. Phase 5 — validation-first baseline, ablation và test (2026-10-10)
+
+Đã chạy trên seed dataset `20261002`, 500.000 request, 35 transaction feature + 12 node feature. Dùng lại GAT Phase 4; train thêm feature MLP, endpoint MLP và GAT self-loop. Tất cả neural model dùng seed 42, cùng split, batch 128, optimizer/learning rate/pos_weight và ngân sách 3 epoch. Best epoch vẫn chọn theo weighted validation loss, không đổi sang chọn epoch theo AP sau khi xem kết quả. Kiến trúc/số tham số và compute khác nhau: cùng ngân sách epoch không có nghĩa cùng capacity. Rule không train weights; threshold được chọn trên validation.
+
+Chọn threshold tối đa F1 trên validation (tie ưu tiên threshold cao hơn). Chọn ứng viên neural model theo validation F1, AP phá tie. `selection.json` chứa model/checkpoint SHA và mọi threshold, ghi trước khi chạy test; checksum được kiểm tra sau test. Test chỉ dùng để báo cáo, không cập nhật lựa chọn. Ứng viên theo quy tắc này là **feature MLP**, threshold `0.927707314491272`; model GAT trong config training vẫn được giữ để nghiên cứu.
+
+| Model | Validation F1 (threshold đã chọn) | Test AP | Test precision | Test recall | Test F1 |
+|---|---:|---:|---:|---:|---:|
+| GATv2 đầy đủ | 0.9567 | 0.9751 | 0.9480 | 0.9452 | 0.9466 |
+| Feature MLP | 0.9726 | 0.9842 | 0.9613 | 0.9656 | 0.9635 |
+| Endpoint MLP | 0.9420 | 0.9736 | 0.9299 | 0.9392 | 0.9346 |
+| GAT self-loop | 0.9673 | 0.9807 | 0.9606 | 0.9586 | 0.9596 |
+| Amount / trung vị cùng source + type | 0.2431 | 0.0773 | 0.1719 | 0.4145 | 0.2430 |
+| History rule | 0.6780 | 0.6580 | 0.9805 | 0.5252 | 0.6840 |
+
+`AP` là average precision dạng bậc thang theo score ties, không phải tích phân trapezoid PR curve. Hai rule đọc cùng causal tensor và train preprocessing: amount dùng `log_amount_to_type_median`; history rule lấy max các cột chuẩn hóa gồm amount ratio, request count 120s và incoming distinct transfer sources của source/destination. Đây là rule tham chiếu đơn giản, không phải rule cũ của EDA; threshold có thể ngoài [0,1] vì rule score không phải sigmoid.
+
+Feature MLP test: TP 1.938, FP 78, FN 69, TN 97.781 trên 99.866 request (2.007 anomaly). False positive rate 0.0797% trên normal. Recall scenario: contextual_amount 92.52%, velocity_burst 99.46%, graph_fan_in 99.02%, rapid_forwarding 100% (127 case). 61/69 FN thuộc contextual_amount. Recall theo type: TRANSFER 98.70%, PAYMENT 98.37%, CASH_IN 91.42%, CASH_OUT 86.06%, DEBIT 97.76%. Cohort scenario chỉ có positive thì precision/F1 không phản ánh false alarm: nên đọc recall/FN; AUC/AP được để null khi chỉ có một class. Breakdown theo type/scenario/tháng nằm trong `report.json`.
+
+**Diễn giải:** feature MLP và self-loop vượt GAT đầy đủ trong lần chạy này; chưa thấy lợi ích của message passing với dataset, snapshot 1h và budget hiện tại. Feature MLP vẫn có scalar thống kê neighborhood/funding nên không được kết luận mọi thông tin graph là vô ích. Điểm cao chủ yếu có thể giải thích bằng causal behavior features khớp giả định generator; đây chưa là bằng chứng generalization trên giao dịch ngân hàng thật.
+
+Chi phí CPU 1 thread, forward amortized trong microbatch: GAT 38.70 us/request; feature MLP 0.75; endpoint MLP 0.98; self-loop 14.29. Chưa tính causal feature extraction và không phải latency online một request. GAT test wall 28.86s bao gồm xây cache mới; model sau dùng cache nóng nên không so trực tiếp wall time đó. Chưa benchmark online/restart.
+
+Artifacts chuẩn: `outputs/contextual-v4/seed-20261002/evaluation/phase5-v1/`: config, checkpoint từng baseline, history/learning curves, immutable selection, test predictions, report JSON/Markdown, bộ hình báo cáo PNG/PDF trong `figures/`. Chạy bằng `make evaluate CONFIG=...` hoặc `python scripts/evaluate_phase5.py --config ...`; muốn chạy lại đặt `evaluation.output` mới, không ghi đè test report cũ.
+
+**Giới hạn còn lại:** mới một seed dataset và seed train; chưa multi-seed robustness/CI; chưa thay snapshot lag hay quét hyperparameter. Funding/activity clipping của simulator và shortcut behavior vẫn còn. Threshold weighted-BCE score không là xác suất đã calibration. Tuning tương lai cần evaluation protocol mới, không tiếp tục tối ưu trên test vừa mở. Phase 6 đóng gói/replay offline, giữ schema/causal state giống train; chứng minh giá trị GAT cần tiếp tục thử nhiều seed và các scenario cần quan hệ graph ngoài scalar hiện có.
+
+
+### Hình báo cáo Phase 5
+
+Bộ hình chính được rút gọn tại `evaluation/phase5-v1/figures/`:
+
+- `roc_pr_curves`: PR và ROC cùng một hình để so sánh các phương pháp; PR hữu ích khi anomaly chỉ khoảng 2%.
+- `confusion_matrix`: duy nhất GATv2 là model nghiên cứu chính, hiển thị count và phần trăm theo true class trong cùng ô.
+- `model_comparison`: bảng precision/recall/F1/AP/ROC-AUC/threshold; không lặp lại thành bar chart.
+
+Mỗi hình có PNG/PDF; `evaluation_charts.pdf` gồm 3 trang. Bộ chẩn đoán mở rộng cũ đã chuyển vào `appendix/`; không sinh mặc định. Dùng lại saved predictions và threshold đã freeze, không train/inference/tuning lại. GATv2 là model nghiên cứu chính trong ma trận và được tô đậm trong bảng; MLP là baseline đối chứng. Kết quả chọn ứng viên theo validation vẫn ghi feature MLP trong selection.json, không thay đổi kết quả lựa chọn hoặc threshold khi chỉnh cách trình bày. Lệnh tái lập: `python scripts/plot_evaluation.py --run ...`. Đã kiểm tra score ties và AP theo step integration; 61 kiểm thử liên quan validation/split/features/training/evaluation đã pass trước lần chỉnh presentation này.
+
+
+### Phạm vi đánh giá được chốt lại
+
+Theo yêu cầu người dùng: chỉ đánh giá GATv2. `evaluation.train_variants=[]`, `include_rule_baselines=false`; runner mặc định chỉ dùng GATv2 checkpoint/threshold. Báo cáo trình bày hiện tại: `gatv2_report.md/json`, ROC/PR GATv2, một confusion matrix và bảng `gatv2_metrics`. Comparison/MLP từ lần chạy trước là dữ liệu lịch sử, không thuộc bộ báo cáo chính. Không train/score/chọn threshold lại khi đổi phạm vi trình bày.
+
+
+### Đối chiếu GATv2 theo tập dữ liệu
+
+Theo yêu cầu bổ sung: bộ hình chính cần đủ **train, validation, test**, cùng best checkpoint GATv2 và threshold validation đã freeze. Ba ma trận lần này tương ứng ba partition của một model, không phải các model khác. Cần phân biệt metric train in-sample với validation và test. Split đang áp dụng 50/30/20 theo các khoảng thời gian liên tục và nguyên ngày; đếm request thực tế 251.481/148.653/99.866 tương ứng 50.30%/29.73%/19.97%. Chưa đổi sang lấy tỷ lệ từng ngày: đã hỏi lại người dùng về ý nghĩa tỷ lệ để tránh thay đổi protocol và phải train lại ngoài ý định. Runner `evaluate_gatv2_splits.py` và `gatv2_partitions/` truy vết cùng checkpoint/threshold, dùng lại prediction validation/test.

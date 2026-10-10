@@ -1,0 +1,6 @@
+# CPU versions used for the first Phase 4 run; direct dependencies, not a full lockfile.
+# Install with the PyTorch CPU index: https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+torch-geometric==2.8.0.post1
+numpy==2.5.2
+matplotlib==3.11.2

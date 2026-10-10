@@ -447,7 +447,7 @@ python3 scripts/check_hour_distribution.py
 
 Validator chỉ cần standard library; kiểm tra contracts, label join, ledger và causal scenario witnesses. Loader kiểm tra source SHA256 và report đã pass trước khi split. Một mẫu cho mỗi TransferCreated/TransactionRequested; native transfer export không được tính thêm giao dịch. Split giữ ngày nguyên theo thời gian, không resample: với 181 ngày, train trước 2025-04-01, validation trước 2025-05-25, test trước 2025-07-01.
 
-Split từ chối output đã tồn tại; `--overwrite` giữ bản trước ở `splits.previous-<id>` cùng seed. Split chỉ chứa request/target và metadata truy vết; terminal status, posted_at, risk, after balances, scenario/profile/identity/loan không là input model. Phase 3 cần replay source events theo thời gian để tạo lịch sử và graph. `--stage all` chưa triển khai và bị từ chối.
+Split từ chối output đã tồn tại; `--overwrite` giữ bản trước ở `splits.previous-<id>` cùng seed. Split chỉ chứa request/target và metadata truy vết; terminal status, posted_at, risk, after balances, scenario/profile/identity/loan không là input model. Phase 3 cần replay source events theo thời gian để tạo lịch sử và graph. `--stage all` chạy validate → split → features → train; reuse artifact chỉ khi checksum/policy khớp.
 
 Baseline score trước khi quan sát current request, dùng lịch sử qua các tập, chọn threshold trên validation rồi giữ nguyên trên test. Precision/recall/F1/AUC/AP là đánh giá các rules amount/behavior/graph, chưa phải kết quả GATv2 hoặc chứng minh dataset sát ngân hàng thực.
 
@@ -502,7 +502,7 @@ inputs = dataset.context(100)  # x, edge_index, target_edge_index, edge_features
 label = dataset.arrays["labels"][100]  # target riêng, không có trong inputs
 ```
 
-Loader chưa chuyển sang Torch. Phase 4 phải giữ graph context đúng từng cutoff; không ghép request có timestamp khác nhau vào một graph muộn hơn. `check_feature_artifacts.py` xác minh checksum, shape, mask, mọi graph cutoff và sample contexts; report nằm ở `validation/features.json`. Chưa train GATv2; các module dataframe cũ không được gọi trong luồng Phase 3 này.
+Loader chưa chuyển sang Torch. Phase 4 phải giữ graph context đúng từng cutoff; không ghép request có timestamp khác nhau vào một graph muộn hơn. `check_feature_artifacts.py` xác minh checksum, shape, mask, mọi graph cutoff và sample contexts; report nằm ở `validation/features.json`. Trainer thật được mô tả ở Phase 4 bên dưới; các module dataframe cũ không được gọi trong luồng causal này.
 
 ### Đối chiếu feature/window với dataset trước khi train
 
@@ -524,3 +524,80 @@ python3 scripts/check_model_inputs.py
 ```
 
 Lệnh chỉ forward/backward hai train rows, derive dimensions từ schema, không optimizer step và không tính evaluation metrics. Report `validation/model-inputs.json` ghi versions đã kiểm tra. Graph 24h lớn hơn bản trước: audit samples đạt tối đa 7.638 directed edges; chi phí replay/node reconstruction/batching cần benchmark ở Phase 4.
+
+### Phase 4: train GATv2 thật
+
+CPU dependencies đã dùng được pin trực tiếp trong `requirements-training.txt` (chưa là lockfile toàn bộ transitive dependencies). Trong Python environment phù hợp:
+
+```bash
+make setup-training
+make train
+# Từ raw dataset tới checkpoint, reuse artifact khớp provenance:
+make all
+```
+
+Hoặc dùng uv với CPU index:
+
+```bash
+uv run --no-project --index https://download.pytorch.org/whl/cpu --with-requirements requirements-training.txt python scripts/run_pipeline.py --stage train
+```
+
+Nix dùng native wheels cần runtime libstdc++/zlib trong library path của dev shell. Run đã kiểm tra với Python 3.13, Torch 2.14.1+cpu, PyG 2.8.0.post1, NumPy 2.5.2, Matplotlib 3.11.2. `make train CONFIG=... PYTHON=...` cho phép chọn config/environment. Các tham số nằm trong `configs/dataset.json.training`; không dùng `model.fit()` hoặc vòng lặp đạt target giả.
+
+Trainer dùng BCEWithLogitsLoss, pos_weight=negative/positive chỉ từ train, AdamW, gradient clipping, CPU deterministic seed, validation mỗi epoch và early stopping theo weighted validation loss. Score sigmoid là score của objective có class weight, chưa là probability đã calibration. Threshold report 0.5 là cấu hình cố định; chọn threshold/tuning là Phase 5. Validation thiếu một class thì AUC/AP ghi null, không dựng điểm giả.
+
+Batch chia theo nhóm thời gian 1h, lấy graph/node context tại request đầu nhóm rồi dùng lại cho các request sau; graph không có timestamp mới hơn target. Feature giao dịch vẫn exact per-request. Microbatch tối đa 128 targets. Node xuất hiện sau cutoff ánh xạ unknown tới lần refresh sau. Snapshot conservative có thể bỏ thông tin graph mới trong giờ đó; đây là tradeoff cần ablation, không tương đương exact graph per-request. Cache có feature/policy identity và checksum, không chứa label.
+
+Output `outputs/contextual-v4/seed-20261002/training/gatv2-v1/`:
+
+- `best.pt`, `last.pt`: model architecture/state, optimizer state, epoch và feature identity.
+- `config.json`, `provenance.json`, bản sao feature manifest/schema/preprocessing/node mapping.
+- `history.json`, `summary.json`, validation predictions, PNG/PDF learning curves.
+- `contexts/`: cached causal snapshots; run đầu khoảng 403 MiB với 3.456 snapshots.
+
+Run thật: train 251.481, validation 148.653, 3 epoch khoảng 180s CPU; best epoch 2 theo validation loss. Validation precision 0,809, recall 0,990, F1 0,890, ROC-AUC 0,9997, AP 0,9816 tại threshold 0,5. Epoch 3 có F1/AP cao hơn nhưng loss cao hơn; checkpoint vẫn theo rule đã chốt. Reload best checkpoint đã cho cùng predictions. **Chưa đánh giá test hoặc chứng minh graph vượt tabular.**
+
+Existing run bị từ chối; chọn root mới hoặc `--overwrite` giữ backup. Ví dụ tái tạo end-to-end:
+
+```bash
+python3 scripts/run_pipeline.py --stage all --output outputs/contextual-v4/seed-20261002/training/gatv2-v1-rerun
+```
+
+`all` xác minh audit/source SHA, split checksum/ratios, feature input/policy/code provenance trước khi reuse; stale artifacts bị từ chối. `--overwrite` trên `all` revalidate/re-export split/features có backup, không đổi raw source. Đây là offline dataset→checkpoint, chưa bao gồm generator, Kafka hay inference.
+
+
+### Phase 5: baseline, ablation và evaluation
+
+```bash
+make evaluate CONFIG=configs/dataset.json
+# hoặc trong environment đã cài requirements-training.txt:
+python scripts/evaluate_phase5.py --config configs/dataset.json
+```
+
+`evaluation` trong config chứa output và rule feature columns. Runner mặc định chỉ đánh giá GATv2 Phase 4. Chọn threshold trên validation, ghi `selection.json` trước khi score test. Không ghi đè evaluation cũ: đặt output mới cho một run mới. `make all` vẫn dừng tại train; evaluate là bước riêng có mở test.
+
+Run `outputs/contextual-v4/seed-20261002/evaluation/phase5-v1/` đã hoàn tất: feature MLP được validation chọn, test F1 0.9635/AP 0.9842; GAT đầy đủ F1 0.9466/AP 0.9751. Chưa thấy lợi ích message passing trong cấu hình hiện tại; feature giao dịch vẫn gồm thống kê lân cận graph. Một seed synthetic không chứng minh hiệu quả ngân hàng thật. Xem mục 18 trong plan để biết threshold, breakdown lỗi, benchmark và giới hạn.
+
+Output gồm `report.md`, `report.json`, `selection.json`, checkpoint các baseline, test predictions NPZ, bộ hình báo cáo trong `figures/`. Chỉ số là đánh giá model trên dataset này; AP là average precision, không phải trapezoidal PR-AUC. Giá trị threshold rule có thể ngoài [0,1]; sigmoid score từ weighted BCE chưa calibration.
+
+
+Xuất lại biểu đồ từ dự đoán test đã lưu (không train/score/chọn threshold lại):
+
+```bash
+python scripts/plot_evaluation.py --run outputs/contextual-v4/seed-20261002/evaluation/phase5-v1
+# hoặc make plot-evaluation
+```
+
+Thư mục `evaluation/phase5-v1/figures/` có ba hình cần cho báo cáo: `roc_pr_curves` (PR + ROC của GATv2), `confusion_matrix` (GATv2 là model nghiên cứu chính, count và % trong cùng ô), `gatv2_metrics` (bảng chỉ số test GATv2). Mỗi hình xuất PNG/PDF; `evaluation_charts.pdf` gom 3 trang. Bộ chẩn đoán mở rộng cũ nằm trong `appendix/`, không xuất mặc định. Risk score từ weighted BCE chưa calibration. Exporter kiểm tra ROC/AP/confusion từ predictions khớp report và checksum selection không đổi.
+
+
+Phạm vi đánh giá hiện tại: **chỉ GATv2**. Config mặc định không train thêm variant/rule baseline. Bộ báo cáo chính dùng `gatv2_report.md/json`; `figures/` chỉ có ROC/PR GATv2, confusion matrix GATv2 và `gatv2_metrics` (PNG/PDF), PDF tổng hợp 3 trang. Các kết quả comparison trước đây là lịch sử, không đưa vào báo cáo hiện tại.
+
+
+Đối chiếu đầy đủ **GATv2 train / validation / test**:
+
+```bash
+python scripts/evaluate_gatv2_splits.py
+```
+
+Dùng cùng best checkpoint và threshold đã chọn trên validation cho cả ba tập, eval mode không dropout. Train cần thu thêm predictions; validation/test dùng predictions đã lưu. Output `gatv2_partitions/` lưu report và predictions từng tập. Bộ hình chính vẫn 3 trang: PR/ROC cả ba tập, ba confusion matrix phân biệt rõ split, và tỷ lệ/số lượng split cùng bảng chỉ số. `plot_evaluation.py` tự dùng bộ đầy đủ khi có `gatv2_partitions/report.json`. Tỷ lệ config 50/30/20 theo ngày liên tục, không phải lấy tỷ lệ trong mỗi ngày; tỷ lệ số request thực tế gần đúng vì lưu lượng ngày khác nhau.

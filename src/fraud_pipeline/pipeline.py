@@ -28,9 +28,65 @@ def stage_split(config_path='configs/dataset.json', *, data=None, output=None, v
     for name, summary in result['splits'].items():
         print(f"{name}: {summary['count']} samples, {summary['anomaly']} anomalies")
     return result
-def stage_train():      print("[5] Train model")
+def stage_train(config_path='configs/dataset.json', *, output=None, overwrite=False):
+    from .models.trainer import train_run
+    cfg=load_config(config_path)
+    return train_run(project_path(cfg['dataset']['features_output']),
+                     project_path(cfg['training']['output']) if output is None else output,
+                     cfg['training'],overwrite=overwrite)
+
+def run_dataset_training(config_path='configs/dataset.json', *, data=None, validation_report=None, output=None, overwrite=False):
+    """Validated raw dataset → splits → causal tensors → checkpoint, reusing exact artifacts."""
+    import json
+    from .ingestion.request_loader import verify_validation, file_hash
+    from .validation import validate_dataset
+    from .validation.report import markdown
+    from .features.dataset import TemporalDataset
+    from .features.export import export_features
+    from .models.trainer import train_run
+    cfg=load_config(config_path)
+    source=project_path(cfg['dataset']['source']) if data is None else data.resolve()
+    report=project_path(cfg['dataset']['validation_report']) if validation_report is None else validation_report.resolve()
+    splits=project_path(cfg['dataset']['output'])
+    features=project_path(cfg['dataset']['features_output'])
+    if source==report.parent or source in report.parents:
+        raise ValueError('Validation report must be outside raw inputs')
+    if not report.exists() or overwrite:
+        audit=validate_dataset(source)
+        report.parent.mkdir(parents=True,exist_ok=True)
+        report.write_text(json.dumps(audit,indent=2)+'\n')
+        report.with_suffix('.md').write_text(markdown(audit))
+    _,hashes,_=verify_validation(source,report)
+    if not splits.exists() or overwrite:
+        export_splits(source,report,splits,cfg['split'],overwrite=overwrite)
+    else:
+        split_manifest=json.loads((splits/'manifest.json').read_text())
+        if (split_manifest['source']['directory']!=str(source.resolve()) or split_manifest['source']['sha256']!=hashes
+            or split_manifest['split_rule']['ratios']!=cfg['split']
+            or split_manifest['validation']['report_sha256']!=file_hash(report)):
+            raise ValueError('Existing splits are stale; use a new run or --overwrite')
+        for value in split_manifest['splits'].values():
+            if file_hash(splits/value['file'])!=value['sha256']:
+                raise ValueError('Split checksum mismatch')
+    if not features.exists() or overwrite:
+        export_features(source,report,splits,features,cfg['features'],overwrite=overwrite)
+    else:
+        artifact=TemporalDataset(features).manifest
+        if artifact['source']!=str(source.resolve()) or artifact['source_sha256']!=hashes or artifact['options']!=cfg['features']:
+            raise ValueError('Existing features use a different dataset or policy')
+        for path,digest in artifact['input_sha256'].items():
+            if file_hash(project_path(path))!=digest:
+                raise ValueError('Existing feature provenance is stale')
+        for name,digest in artifact['code_sha256'].items():
+            if file_hash(project_path('src/fraud_pipeline/features')/name)!=digest:
+                raise ValueError('Feature context code differs from artifact; re-export features')
+    print('Validated dataset, split and feature artifacts; starting training',flush=True)
+    return train_run(features,project_path(cfg['training']['output']) if output is None else output,
+                     cfg['training'],overwrite=overwrite)
 def stage_tune():       print("[6] Hyperparameter tuning")
-def stage_evaluate():   print("[7] Đánh giá")
+def stage_evaluate(config_path='configs/dataset.json'):
+    from .evaluation.phase5 import run
+    return run(load_config(config_path), project_path('.'))
 def stage_compare():    print("[8] So sánh kết quả")
 def stage_save():       print("[9] Lưu model")
 def stage_infer():      print("[10] Inference")
@@ -43,11 +99,5 @@ STAGES = {
 }
 
 def run_training_loop():
-    """Bước 5-8, lặp lại nếu kết quả chưa đạt yêu cầu."""
-    cfg = load_config()
-    for i in range(cfg["target_metrics"]["max_iterations"]):
-        stage_train(); stage_tune(); stage_evaluate(); stage_compare()
-        reached = True  # TODO: gọi compare.meets_target(...)
-        if reached:
-            break
-        print(f"Chưa đạt, lặp lần {i + 2}")
+    """Run configured training; tuning and comparison are separate Phase 5 work."""
+    return stage_train()

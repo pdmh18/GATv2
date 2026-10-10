@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from fraud_pipeline.pipeline import STAGES
+from fraud_pipeline.pipeline import STAGES, run_dataset_training
 
 
 def main():
@@ -19,8 +19,17 @@ def main():
         if args.stage in {'split', 'features'}:
             STAGES[args.stage](args.config, data=args.data, output=args.output,
                             validation_report=args.validation_report, overwrite=args.overwrite)
+        elif args.stage == 'train':
+            if args.data or args.validation_report:
+                parser.error('Train reads feature artifact from config; raw dataset overrides apply to split/features')
+            STAGES['train'](args.config,output=args.output,overwrite=args.overwrite)
+        elif args.stage == 'evaluate':
+            if any([args.data, args.output, args.validation_report, args.overwrite]):
+                parser.error('Evaluation paths are configured in dataset/evaluation; use a new evaluation.output for a new run')
+            STAGES['evaluate'](args.config)
         elif args.stage == 'all':
-            parser.error('--stage all is not implemented end-to-end; use --stage split or features')
+            run_dataset_training(args.config,data=args.data,validation_report=args.validation_report,
+                                 output=args.output,overwrite=args.overwrite)
         else:
             if any([args.data, args.output, args.validation_report, args.overwrite]):
                 parser.error('Dataset/output options currently apply only to split or features')
