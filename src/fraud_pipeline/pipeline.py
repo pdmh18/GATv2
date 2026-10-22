@@ -89,7 +89,9 @@ def stage_evaluate(config_path='configs/dataset.json'):
     return run(load_config(config_path), project_path('.'))
 def stage_compare():    print("[8] So sánh kết quả")
 def stage_save():       print("[9] Lưu model")
-def stage_infer():      print("[10] Inference")
+def stage_infer(config_path='configs/inference.json'):
+    from .inference.stream_inference import load_inference_config, run
+    return run(load_inference_config(config_path))
 
 STAGES = {
     "ingest": stage_ingest, "preprocess": stage_preprocess, "features": stage_features,

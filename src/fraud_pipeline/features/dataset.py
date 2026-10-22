@@ -5,6 +5,34 @@ from ..ingestion.request_loader import file_hash
 from .nodes import dynamic_features
 
 
+def graph_context(arrays, options, node_preprocessing, at, end):
+    """Shared offline/serving graph and node inputs at a strict causal cutoff."""
+    import numpy as np
+    times = arrays['graph_timestamps_us']
+    if not 0 <= end <= len(times) or (end and times[end - 1] >= at) or (end < len(times) and times[end] < at):
+        raise ValueError('Graph prefix violates strict causal cutoff')
+    start = int(np.searchsorted(times[:end], at - options['graph_window_seconds'] * 1000000, side='left'))
+    edges = arrays['graph_edge_index'][:, start:end]
+    kinds = arrays['graph_kind'][start:end]
+    selection = np.ones(len(kinds), dtype=bool)
+    if options['graph_history'] != 'both':
+        selection &= kinds == int(options['graph_history'] == 'settled')
+    edges = np.asarray(edges[:, selection])
+    edges = edges[:, edges[0] != edges[1]]
+    if options['bidirectional_graph']:
+        edges = np.concatenate([edges, edges[::-1]], axis=1)
+    edges = np.unique(edges, axis=1)
+    node_features = arrays['node_features'].copy()
+    available = arrays['node_created_at_us'] <= at
+    if node_preprocessing is not None:
+        dynamic = dynamic_features(arrays, at, end, len(node_features), options['node_history_window_seconds'])
+        dynamic[:, :6] = (dynamic[:, :6] - np.asarray(node_preprocessing['mean'])) / np.asarray(node_preprocessing['scale'])
+        node_features = np.concatenate([node_features, dynamic], axis=1)
+    node_features[~available] = 0
+    return {'x': node_features, 'edge_index': edges, 'node_available_mask': np.asarray(available),
+            'timestamp_us': at, 'graph_interval': [start, end]}
+
+
 class TemporalDataset:
     def __init__(self, directory, *, verify=True):
         import numpy as np
@@ -36,31 +64,8 @@ class TemporalDataset:
             raise IndexError(index)
         a, options = self.arrays, self.manifest['options']
         at, end = int(a['request_timestamps_us'][index]), int(a['graph_prefix'][index])
-        times = a['graph_timestamps_us']
-        if not 0 <= end <= len(times) or (end and times[end - 1] >= at) or (end < len(times) and times[end] < at):
-            raise ValueError('Graph prefix violates strict causal cutoff')
-        start = int(np.searchsorted(times[:end], at - options['graph_window_seconds'] * 1000000, side='left'))
-        edges = a['graph_edge_index'][:, start:end]
-        kinds = a['graph_kind'][start:end]
-        selection = np.ones(len(kinds), dtype=bool)
-        if options['graph_history'] != 'both':
-            selection &= kinds == int(options['graph_history'] == 'settled')
-        edges = np.asarray(edges[:, selection])
-        edges = edges[:, edges[0] != edges[1]]
-        if options['bidirectional_graph']:
-            edges = np.concatenate([edges, edges[::-1]], axis=1)
-        edges = np.unique(edges, axis=1)
-        node_features = a['node_features'].copy()
-        available = a['node_created_at_us'] <= at
-        if self.node_preprocessing is not None:
-            dynamic = dynamic_features(a, at, end, self.manifest['node_count'], options['node_history_window_seconds'])
-            prep = self.node_preprocessing
-            dynamic[:, :6] = (dynamic[:, :6] - np.asarray(prep['mean'])) / np.asarray(prep['scale'])
-            node_features = np.concatenate([node_features, dynamic], axis=1)
-        node_features[~available] = 0
-        return {'x': node_features, 'edge_index': edges,
+        context = graph_context(a, options, self.node_preprocessing, at, end)
+        return {**context,
                 'target_edge_index': a['target_edge_index'][:, index:index + 1].copy(),
                 'flow_edge_index': a['flow_edge_index'][:, index:index + 1].copy(),
-                'edge_features': a['transaction_features'][index:index + 1].copy(),
-                'node_available_mask': np.asarray(available), 'timestamp_us': at,
-                'graph_interval': [start, end]}
+                'edge_features': a['transaction_features'][index:index + 1].copy()}

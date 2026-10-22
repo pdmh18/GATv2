@@ -49,6 +49,10 @@ def train_run(features, output, config, *, overwrite=False):
         raise ValueError('Training requires both classes')
     weight=negatives/positives
     model_config=dict(config['model'],in_dim=len(dataset.manifest['node_feature_names']),edge_dim=len(dataset.manifest['feature_names']))
+    masked_names=model_config.pop('masked_feature_names',[])
+    if len(set(masked_names))!=len(masked_names) or any(name not in dataset.manifest['feature_names'] for name in masked_names):
+        raise ValueError('Unknown/duplicate masked feature names')
+    if masked_names:model_config['masked_feature_indices']=[dataset.manifest['feature_names'].index(name) for name in masked_names]
     model_config['kind']=config.get('model_kind','gatv2')
     model=build_model(model_config).to(device)
     if output.exists():

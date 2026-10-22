@@ -82,7 +82,7 @@ def run(config, root):
     digest = file_hash(features/'manifest.json')
     torch.set_num_threads(config['training']['threads'])
     output.mkdir(parents=True)
-    cache = reference/'contexts'
+    cache = Path(config['training'].get('context_cache',reference/'contexts'))
     (output/'config.json').write_text(json.dumps(config, indent=2)+'\n')
     variants = {'gatv2': reference}
     # Keep the Phase 4 checkpoint selection rule (minimum weighted validation loss).

@@ -48,7 +48,8 @@ def validate_tables(tables, manifest, audit):
             'destination': lambda v: isinstance(v, dict), 'amount': lambda v: integer(v, 1), 'fee': integer,
             'currency': lambda v: v == 'VND', 'type': lambda v: v in TYPES, 'channel': lambda v: v in CHANNELS,
             'status': lambda v: v in {'success', 'failed'}, 'idempotency_key': text, 'created_at': time_value,
-            'posted_at': lambda v: v is None or time_value(v), 'calendar_context': lambda v: isinstance(v, dict)}, loc, exact=True)
+            'posted_at': lambda v: v is None or time_value(v), 'calendar_context': lambda v: isinstance(v, dict),
+            **({'device': lambda v: v is None or (isinstance(v,dict) and set(v)=={'device_id','platform'} and text(v['device_id']) and text(v['platform']))} if 'device' in tx else {})}, loc, exact=True)
         audit.check(no_leakage(tx), 'leakage', loc, 'Risk/ground-truth must not appear in transaction snapshot')
         if not ok:
             continue
@@ -116,6 +117,9 @@ def validate_tables(tables, manifest, audit):
             if not transfer:
                 expected['transactionType'] = tx['type']
             audit.check(all(p.get(k) == v for k, v in expected.items()), 'snapshot_match', e['event_id'], 'Event and transaction snapshot disagree')
+        if isinstance(tx.get('device'),dict):
+            for key in ('device_id','platform'):
+                audit.check(first['payload'].get(key)==tx['device'][key], 'device_snapshot_match',identity,'Request device disagrees with transaction snapshot')
         label = labels.get(identity, {})
         audit.check(label.get('event_id') == first['event_id'], 'label_request', identity, 'Label must refer to request, not terminal event')
     for n, row in enumerate(tables['transfer_events'], 1):

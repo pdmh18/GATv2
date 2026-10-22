@@ -51,6 +51,7 @@ class GATv2(nn.Module):
         dropout: float = 0.2,
         *,
         in_channels: Optional[int] = None,
+        masked_feature_indices: Optional[list[int]] = None,
     ) -> None:
         super().__init__()
 
@@ -77,6 +78,10 @@ class GATv2(nn.Module):
                 "nên `out_dim` phải bằng 1."
             )
 
+        indices=masked_feature_indices or []
+        if len(set(indices))!=len(indices) or any(type(i) is not int or not 0<=i<edge_dim for i in indices):
+            raise ValueError('Invalid masked transaction feature indices')
+        self.masked_feature_indices=tuple(indices)
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
         self.edge_dim = edge_dim
@@ -216,6 +221,9 @@ class GATv2(nn.Module):
                     f"nhưng model được tạo với edge_dim={self.edge_dim}."
                 )
 
+            if self.masked_feature_indices:
+                edge_features=edge_features.clone()
+                edge_features[:,list(self.masked_feature_indices)]=0
             parts.append(edge_features)
         elif edge_features is not None and edge_features.numel() > 0:
             raise ValueError(

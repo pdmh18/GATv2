@@ -1,5 +1,6 @@
 """Dataset schema 2 event contracts; native transfer export uses schema 1."""
 from uuid import UUID
+from ..features.request_context import OPTIONAL_FIELDS
 
 from .core import fields, integer, text, time_value, no_leakage
 
@@ -63,6 +64,10 @@ def validate_event(audit, event, location):
             payload_spec.update(sourceBalanceBefore=integer, sourceBalanceAfter=integer)
             if kind in TRANSFER_TYPES:
                 payload_spec.update(destinationBalanceBefore=integer, destinationBalanceAfter=integer)
+        if kind in REQUESTS:
+            for key in OPTIONAL_FIELDS:
+                if key in payload:
+                    payload_spec[key]=(lambda v: v is None or type(v) is bool) if key=='authentication_verified' else (lambda v: v is None or text(v))
         valid = fields(audit, payload, payload_spec, location + ".payload", exact=True) and valid
         valid = audit.check(no_leakage(payload), "leakage", location, "Risk/label field in detector input") and valid
     else:

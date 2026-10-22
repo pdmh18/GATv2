@@ -47,6 +47,14 @@ class ContextualValidationTests(unittest.TestCase):
         (self.root/'manifest.json').write_text(json.dumps(manifest))
         mutate(self.root, 'behavior_profiles', lambda rows: [r.update(preferred_channel='mobile') for r in rows])
 
+    def test_device_profile_still_checks_contextual_witnesses(self):
+        self.configure_v4()
+        manifest=json.loads((self.root/'manifest.json').read_text())
+        manifest['scenario_profile']='contextual-v5-device'
+        (self.root/'manifest.json').write_text(json.dumps(manifest))
+        mutate(self.root,'behavior_profiles',lambda rows:[r.update(typical_amount=10000) for r in rows])
+        self.assertTrue(any(i['code']=='scenario_witness' for i in validate_dataset(self.root)['issues']))
+
     def test_v4_accepts_contextual_amount_in_preferred_hours(self):
         self.configure_v4()
         report = validate_dataset(self.root)

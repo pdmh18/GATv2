@@ -113,6 +113,7 @@ def request_samples(source: Path, timezone):
             'amount': payload['amount'], 'fee': payload['fee'], 'currency': payload['currency'],
             'type': 'TRANSFER' if event['event_type'] == 'TransferCreated' else payload['transactionType'],
             'channel': payload['channel'], 'label': target,
+            **{k:payload[k] for k in ('authentication_method','authentication_verified','device_id','platform') if k in payload},
         }
     if remaining:
         raise DatasetError(f'{len(remaining)} labels have no request event')

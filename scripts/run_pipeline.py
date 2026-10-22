@@ -27,6 +27,10 @@ def main():
             if any([args.data, args.output, args.validation_report, args.overwrite]):
                 parser.error('Evaluation paths are configured in dataset/evaluation; use a new evaluation.output for a new run')
             STAGES['evaluate'](args.config)
+        elif args.stage == 'infer':
+            if any([args.data, args.output, args.validation_report, args.overwrite]):
+                parser.error('Inference reads bundle/history/Kafka settings from its config')
+            STAGES['infer'](args.config)
         elif args.stage == 'all':
             run_dataset_training(args.config,data=args.data,validation_report=args.validation_report,
                                  output=args.output,overwrite=args.overwrite)

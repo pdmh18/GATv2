@@ -1,0 +1,4 @@
+-r requirements-training.txt
+kafka-python
+esdbclient
+pymongo

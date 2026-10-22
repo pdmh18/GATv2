@@ -1,0 +1,17 @@
+{
+  "bundle": "outputs/registry/gatv2-device-control-v1",
+  "device": "cpu",
+  "history": {
+    "kind": "jsonl",
+    "path": "outputs/contextual-v5-device/seed-20261002/raw/events.jsonl"
+  },
+  "kafka": {
+    "bootstrap_servers": ["localhost:9092"],
+    "input_topic": "transaction",
+    "output_topic": "transaction-risk",
+    "group_id": "gatv2-inference-v1",
+    "auto_offset_reset": "earliest",
+    "max_poll_interval_ms": 900000,
+    "delivery_timeout_seconds": 30
+  }
+}

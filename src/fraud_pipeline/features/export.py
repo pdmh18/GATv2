@@ -106,6 +106,8 @@ def export_features(source, validation_report, splits, output, options, *, overw
                                                      ('amount', 'amount'), ('fee', 'fee'), ('channel', 'channel')])
                     or row['type'] != kind):
                     raise ValueError('Request/split alignment mismatch')
+                for key in ('authentication_method','authentication_verified','device_id','platform'):
+                    if row.get(key)!=p.get(key):raise ValueError('Optional request context/split mismatch')
                 features[actual] = values
                 src, dst = node_id(row['src_acc'], at), node_id(row['dst_acc'], at)
                 target_edges[:, actual] = [src, dst]
@@ -183,12 +185,14 @@ def export_features(source, validation_report, splits, output, options, *, overw
         for path, digest in input_hashes.items():
             if file_hash(Path(path)) != digest:
                 raise ValueError('Input changed during feature export')
-        result = {'schema_version': 2, 'source': str(source), 'source_sha256': hashes, 'input_sha256': input_hashes,
+        result = {'schema_version': 3 if options.get('mean_window_seconds') or options.get('include_request_context') else 2, 'source': str(source), 'source_sha256': hashes, 'input_sha256': input_hashes,
                   'request_count': count, 'node_count': len(nodes), 'graph_event_count': graph_count,
                   'feature_names': schema, 'node_static_feature_names': NODE_TYPES,
                   'node_feature_names': [*NODE_TYPES, *NODE_DYNAMIC_NAMES], 'options': options,
+                  'request_context_policy': 'Optional request-time snake_case fields authentication_method/authentication_verified/device_id/platform. Missing is encoded with flags and unknown category; device_id is used only for prior novelty, never raw numeric input. Current posted_at excluded.',
+                  'mean_policy': 'Completed amount mean per source+type, configurable window; separate support/reliability flags. Median reference remains separate.',
                   'timezone': datetime.fromisoformat(manifest['start_at']).strftime('%z'),
-                  'code_sha256': {p.name: file_hash(p) for p in [Path(__file__), *[Path(__file__).with_name(n) for n in ('causal.py','dataset.py','history.py','nodes.py')]]},
+                  'code_sha256': {p.name: file_hash(p) for p in [Path(__file__), *[Path(__file__).with_name(n) for n in ('causal.py','dataset.py','history.py','nodes.py','request_context.py')]]},
                   'split_counts': {name: split_manifest['splits'][name]['count'] for name in SPLITS},
                   'graph_kind': {'attempt': 0, 'settled': 1}, 'graph_type': TYPES,
                   'time_policy': 'Requests at t see only timestamps < t. All same-timestamp requests score before group observations.',

@@ -84,5 +84,14 @@
       "log_src_transfer_attempt_distinct_sources"
     ],
     "include_rule_baselines": false
+  },
+  "feature_eda": {
+    "output": "outputs/contextual-v4/seed-20261002/eda/feature-audit-v1",
+    "seed": 42,
+    "correlation_samples": 50000,
+    "correlation_threshold": 0.95,
+    "node_contexts": 64,
+    "importance_contexts": 64,
+    "importance_repeats": 3
   }
 }

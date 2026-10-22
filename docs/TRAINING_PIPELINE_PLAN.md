@@ -25,7 +25,7 @@ Dataset JSONL + manifest + labels
   → tích hợp canonical event của Anomaly
 ```
 
-Ưu tiên hoàn thành từng phase và kiểm chứng đầu ra trước khi chuyển tiếp. Phase 4 đã train thật trên seed chính, 3 epoch CPU, checkpoint load lại khớp dự đoán. Phase 5 đã hoàn thành so sánh, freeze threshold trên validation và đánh giá test; xem mục 18. Task tiếp theo Phase 6.
+Ưu tiên hoàn thành từng phase và kiểm chứng đầu ra trước khi chuyển tiếp. Phase 4 đã train thật trên seed chính, 3 epoch CPU, checkpoint load lại khớp dự đoán. Phase 5 đã hoàn thành so sánh, freeze threshold trên validation và đánh giá test; xem mục 18. Ưu tiên hiện tại: feature EDA và kiểm chứng rút gọn input GATv2 trước Phase 6.
 
 ## 2. Các quyết định đã thống nhất
 
@@ -175,7 +175,7 @@ Event transfer hỗ trợ `TransferCreated`, `TransferOTPUpdated`, `TransferComp
 
 ## 5. Công việc tiếp theo và quy tắc bàn giao
 
-**Task tiếp theo: Phase 6 — đóng gói và inference offline.** Phase 5 ở mục 18 đã chốt model/threshold trên validation rồi mới đánh giá test. Chưa có bằng chứng GAT vượt baseline; cần giữ MLP làm đối chứng trong nghiên cứu tiếp theo.
+**Task hiện tại: feature EDA cho GATv2 trước khi rút gọn feature và sang Phase 6.** Phạm vi hiện tại chỉ GATv2; không train thêm model baseline. Correlation/biến thiên trên train; độ nhạy trên validation; không chọn feature bằng test.
 
 Khi bàn giao phase, cập nhật checkbox, file/command đã thay đổi, lệnh kiểm tra và kết quả, giới hạn chưa kiểm chứng, cùng task tiếp theo. Chỉ đánh dấu hoàn thành khi đầu ra thực có thể chạy/kiểm tra; không coi scaffold hay thông báo stage là pipeline đã hoạt động.
 
@@ -558,3 +558,100 @@ Theo yêu cầu người dùng: chỉ đánh giá GATv2. `evaluation.train_varia
 ### Đối chiếu GATv2 theo tập dữ liệu
 
 Theo yêu cầu bổ sung: bộ hình chính cần đủ **train, validation, test**, cùng best checkpoint GATv2 và threshold validation đã freeze. Ba ma trận lần này tương ứng ba partition của một model, không phải các model khác. Cần phân biệt metric train in-sample với validation và test. Split đang áp dụng 50/30/20 theo các khoảng thời gian liên tục và nguyên ngày; đếm request thực tế 251.481/148.653/99.866 tương ứng 50.30%/29.73%/19.97%. Chưa đổi sang lấy tỷ lệ từng ngày: đã hỏi lại người dùng về ý nghĩa tỷ lệ để tránh thay đổi protocol và phải train lại ngoài ý định. Runner `evaluate_gatv2_splits.py` và `gatv2_partitions/` truy vết cùng checkpoint/threshold, dùng lại prediction validation/test.
+
+
+### Cleanup dung lượng
+
+Đã dọn payload có thể sinh lại trong `outputs/`: raw/split JSONL, feature tensors và backup, graph context cache, diagnostic arrays và archive data cũ. Giải phóng khoảng 8.73 GiB; outputs còn khoảng 43 MiB, giữ checkpoints/reports/figures và evaluation predictions. Trạng thái hiện tại không còn raw/split/features trên đĩa: cần `make generate-dataset` rồi dựng lại pipeline input trước khi train/replay. Các kết quả trong plan là kết quả lịch sử đã giữ báo cáo, không có nghĩa tensors vẫn tồn tại. `make clean-data` tái sử dụng cleanup; `outputs/cleanup.json` ghi các đường dẫn đã dọn.
+
+
+## 19. Feature EDA — leakage, redundancy, sensitivity và overfit screening
+
+Bổ sung theo review; ưu tiên đánh giá trước khi sửa schema. CLI `scripts/audit_features.py`, Make `feature-eda`, tùy chọn tại `configs/dataset.json.feature_eda`.
+
+- [x] Dựng tạm seed 20261002, 500k request sau cleanup. 21/21 payload files khớp SHA với manifest input checkpoint; không dùng nhầm dataset/model. Dữ liệu tạm được dọn sau báo cáo.
+- [x] 10 invariant checks: schema/policy, finite input, split disjoint/chronological, strictly prior graph prefixes, scaler train-only metadata và train moments, không có cột copy trực tiếp target/complement. 15 causal regression tests pass. Đây là kiểm tra có giới hạn, không chứng minh vắng mọi leakage/arrival-time mismatch.
+- [x] Thống kê toàn bộ 251.481 train request; Pearson/Spearman trên fixed sample 50k train. Có 2 transaction constants `type_unknown`, `channel_unknown`; `has_previous` chiếm 99.60% một giá trị. Các cột fallback/missing flags không tự động vô nghĩa.
+- [x] Node statistics/correlation trên 64 train cutoffs, 66.560 available known-node observations (lặp node theo thời gian, không coi là independent samples). `unknown` hằng vì sample known nodes; chưa đo effectiveness của unknown fallback realtime.
+- [x] Có 2 transaction candidate pairs, gồm cặp unknown constants. Transfer incoming distinct-source count vs received amount: Spearman 0.9989, nhưng 99.08% joint modal values; sau khi bỏ phần này chỉ còn 0.5488 trên 460 sample. Không thể kết luận hai feature trùng thông tin chỉ từ full correlation. 4 node candidate pairs: count/unique-partner và median/history flag, cần kiểm tra theo nhóm trước khi rút gọn.
+- [x] Grouped permutation trên 7.334 validation request / 64 hourly contexts (132 positive), 3 repeat. Giữ nguyên checkpoint epoch 2, threshold 0.9681, graph/node embeddings; baseline predictions khớp subset đã lưu. AP baseline subset 0.9859. Mean AP drop: request velocity 0.4915; transfer neighborhood 0.2929; behavior habits 0.2253; receiver novelty 0.1606; amount reference 0.1226; source history 0.0133; type 0.0011; calendar 0.0008; channel encoding 0.0002. Đây là sensitivity, không phải unique contribution; drops không cộng được, permutation có thể phá cross-group dependencies. Repeat std không phải confidence interval.
+- [x] Đối chiếu metrics cùng checkpoint: train F1/AP 0.9101/0.9448, validation 0.9567/0.9816, test 0.9466/0.9751. Train cold-start 7.95% vs holdout 0%; reference reliable 88.43% vs validation 96.23%, test 96.17%. Chưa kết luận không overfit; khác biệt lịch sử/distribution cần xem cùng gap. Test chỉ mô tả, không dùng loại/chọn feature.
+- [ ] Retrained ablation trên chính GATv2 với các nhóm feature đã chốt; chưa chạy. Không sửa schema hoặc train model khác trong bước EDA này.
+
+Artifact: `outputs/contextual-v4/seed-20261002/eda/feature-audit-v1/report.md/json`, CSV thống kê/pairs/association/history coverage, correlation matrices NPZ, 3 PNG và PDF tổng hợp. File `causal_tests.txt` và `audit_code.json` ghi validation/code provenance. Báo cáo chỉ có summary/correlation, không giữ raw/tensor/cache lớn.
+
+Kết luận bước EDA: chưa tìm thấy lỗi trong các leakage checks đã chạy; có candidate redundancy và nhóm feature ít sensitivity trong checkpoint hiện tại. Chưa có bằng chứng đủ để xóa feature ngay hoặc khẳng định không overfit. Bước kế tiếp là chốt ablation GATv2 bằng train/validation, không dùng lại test để tuning.
+
+
+## 20. Feature reviewer và window động (chuẩn bị đánh giá)
+
+- Thêm mean completed của cùng source+type, window mặc định 7d, count/has-history/reliability/ratio; giữ median 30d riêng. Thêm count request 300s bên cạnh 120s/1h/24h.
+- Thêm optional request auth/device/platform: one-hot, boolean + availability flags, new_device theo prior requests của từng source. Không đưa raw device_id vào numeric tensor; posted_at hiện tại tiếp tục excluded. Generator/BE hiện chưa cung cấp context này; chưa đo effectiveness của feature thiếu nguồn.
+- Cấu hình thử nghiệm `configs/features-v3.json` có 58 transaction dimensions, 12 node dimensions. Legacy 35-dim config/checkpoint không bị ghi đè; tensor schema v3 chỉ dùng model train mới.
+- `scripts/configure_feature_window.py` và `make configure-window WINDOW=1d|1w|1mo` tạo config; window chung hoặc mean/median/graph/node độc lập. 1mo fixed 30d. Request frequency/neighborhood ngắn độc lập với graph lookback. Output phân biệt theo canonical duration để không trộn model/provenance.
+- EDA được cập nhật nhóm mean/auth/device và coverage. Khi input không khớp checkpoint reference, bỏ qua model importance và đánh dấu metrics cũ là historical; không lấy số cũ để tuyên bố model mới tốt hơn.
+- Đánh giá kế tiếp: bổ sung nguồn context nếu cần, dựng feature, so GATv2 trên validation giữa các window, freeze cuối rồi mới test. Chưa train lại hoặc chạy full-dataset experiment trong bước chuẩn bị này. Chi tiết và lệnh: `docs/FEATURE_WINDOWS.md`.
+
+Kiểm chứng bước feature/window: 69 tests liên quan validation, split, causal tensors, training, EDA và reviewer additions pass. Bao gồm export tensor v3 trên fixture, mean cùng nghiệp vụ, missing-vs-false auth, device novelty same-timestamp, parser/profile windows và backward compatibility 35 dimensions. Đã tạo ba config 1d/1w/1mo ở `outputs/configs/`; chưa sinh lại 500k hoặc train checkpoint mới.
+
+
+## 21. Device có nguồn trong generator
+
+Đã cập nhật repo cùng cấp `anomaly-data-pipeline`: transaction snapshot có `device={device_id,platform}`; request event giữ cùng identity/platform, terminal không được dùng để bổ sung feature tương lai. `DeviceHistory` dùng RNG riêng, không đọc label/scenario; TOML điều khiển tỷ lệ device mới (mặc định 0.04), pool device quen (tối đa 3), phân bố Android/iOS. Web/desktop giữ platform tương ứng. Không emit cờ oracle `new_device`: detector tính từ prior request history. Bật device không đổi amount/type/labels.
+
+Dataset có device dùng `configs/device-v1.json`, root `outputs/contextual-v5-device/`; không ghi đè kết quả v4. GAT validator hỗ trợ snapshot device và kiểm tra khớp request. Auth chưa được generator bổ sung; Go Backend enrichment chưa triển khai. Device IDs mô phỏng chưa phải bằng chứng xác thực hardware/trusted-device.
+
+Kiểm chứng: 70 tests GATv2 pass; generator regression và integration 1.200 request kiểm tra data validation, snapshot/request consistency, novelty/reuse, normal-new/anomaly-known, reproducibility và nhãn/amount không đổi khi bật device. Chưa tạo lại bộ 500k, chưa đánh giá model/ablation với device mới. Bước tiếp theo: sinh dataset mới, EDA coverage/correlation/sensitivity, train GATv2 theo các window và chọn bằng validation.
+
+## 22. Kết quả đối chứng device (cập nhật sau mục 21)
+
+Đã sinh 500k device, train hai GATv2 cùng 58 chiều, seed/budget (3 epoch), chọn checkpoint theo validation loss và threshold validation trước test. Test F1: original 35 chiều 0.9466; 58 chiều che device 0.9378; bật device 0.9322. Bản mới chưa cải thiện trong lần thử này. Dataset device dùng lại các giao dịch/nhãn cũ, đã kiểm tra SHA của projection legacy; không dùng kết quả test để đổi lựa chọn frozen. Báo cáo: `outputs/contextual-v5-device/seed-20261002/experiments/device-v1/report.md`. Một seed, chưa chứng minh ý nghĩa thống kê hoặc chất lượng dữ liệu ngân hàng thật.
+
+## 23. Áp dụng specs/review.md — replay/inference
+
+- [x] Thay predictor tabular bằng `ReplayPredictor` dùng checkpoint GATv2, schema/scaler train-only và validation threshold trong bundle có checksum.
+- [x] Chia sẻ graph/node context với offline; transaction feature dùng cùng causal State. Giữ first-request snapshot bucket của training; không đọc future/current terminal khi score.
+- [x] Nhận raw transaction contract review, canonical schema 2 và native Go transfer schema 1. Trả risk_score, predicted_label, threshold, model_version, feature_version; chỉ GATv2.
+- [x] History adapters JSONL/EventStoreDB/Mongo event projection; Kafka worker gửi result có acknowledgement trước khi commit. Replay có thể khôi phục từ history khi restart.
+- [x] Profile graph/node history 7 ngày trong `configs/review-v2.json`, output riêng, window cấu hình động; đã train và đánh giá theo mục 24.
+- [ ] Kiểm chứng hạ tầng Kafka/EventStoreDB/MongoDB thật; Go consume result/upsert và FE hiển thị; enrichment auth/device trong Go, projection completeness/watermark và node registration. Không đánh dấu hoàn tất end-to-end bằng unit tests.
+- [ ] Tối ưu replay prefix thành state phục vụ throughput; bảo toàn policy lịch sử toàn cục, same-timestamp và rollback khi late arrival. GATv2 hiện không có TGN/LSTM memory.
+
+Chi tiết mapping, contract, lệnh chạy và giới hạn tại `docs/REVIEW_V2_IMPLEMENTATION.md`.
+
+Kiểm chứng local 2026-10-18: 82 tests và 14 subtests pass. Bundle thật khoảng 260 KiB; smoke checkpoint đã train với request index 20 của bộ 500k cho tensor và score replay khớp offline (max tensor difference 0). CLI replay từ working directory khác chạy thành công. Artifact parity: `outputs/inference/review-v2/parity.json`. Không chạy broker/database hoặc sửa Go trong bước này.
+
+## 24. Train lại review-v2 — graph/node history 7 ngày
+
+Ngày 2026-10-18, chạy `scripts/run_pipeline.py --stage all --config configs/review-v2.json`, sau đó `--stage evaluate` với cùng config. Raw dataset 500k giữ nguyên; validator mới chạy lại đầy đủ (0 errors, các warning giống bản trước), validation report và split lưu riêng. Split vẫn 251.481/148.653/99.866 request (5.002/2.991/2.007 anomaly). Đối chiếu 15 input checks với full-device 24h đều khớp: transaction tensors/scaler, labels/time/masks, target/graph timeline và node catalog không đổi. Graph/node history đổi từ 24h sang 7d; node scaler được fit lại bằng train. Mean 7d, median 30d, 58 transaction + 12 node dimensions giữ nguyên.
+
+Train seed 42, 3 epoch, cùng optimizer/architecture/budget, không train model khác. Validation loss theo epoch 0.04207 / 0.03951 / 0.05091; AP tương ứng 0.97291 / 0.98198 / 0.98496. Chọn epoch 2 bằng **minimum weighted validation loss**, không đổi sang chọn AP sau khi xem kết quả. Reload checkpoint đã kiểm chứng khớp prediction. Training khoảng 484 giây gồm context/cache/validation; không so compute trực tiếp với run cũ sử dụng cache đã warm.
+
+Threshold 0.94979429 chọn bằng validation F1 và freeze trước khi score test. Metric cùng checkpoint/threshold:
+
+| Partition | Precision | Recall | F1 | AP |
+| --- | ---: | ---: | ---: | ---: |
+| Train | 0.86825 | 0.96701 | 0.91497 | 0.95300 |
+| Validation | 0.94356 | 0.96690 | 0.95509 | 0.98198 |
+| Test | 0.94176 | 0.95067 | 0.94619 | 0.97293 |
+
+Test confusion: TN 97.741, FP 118, FN 99, TP 1.908. So full-device 24h, F1 tăng 1.40 điểm phần trăm (0.93218 → 0.94619), FP giảm 32 và FN giảm 25. So original 35 chiều (F1 0.94661), kết quả gần ngang nhưng chưa vượt. Đây là một seed và holdout đã dùng trong các báo cáo trước, không phải test độc lập mới; không kết luận ý nghĩa thống kê hoặc tách riêng ảnh hưởng graph window với node-history window.
+
+Artifact: `outputs/contextual-v5-device/seed-20261002/experiments/review-v2/{protocol,input_checks,report}.json`, `report.md`; training/evaluation ở đường dẫn trong config, có learning curves và ROC/PR/confusion đủ train/validation/test. Không tự đổi bundle inference mặc định hoặc mở kết nối hạ tầng.
+
+## 25. Refactor bộ tiêu chí và EDA sau review
+
+Ngày 2026-10-19, refactor `specs/Bo_tieu_chi_phat_hien_giao_dich_bat_thuong.md`, giữ 49 mã. Catalog `specs/anomaly_criteria.v2.json` lưu công thức, unit, evaluation mode, nguồn, lịch tham chiếu, tham số thử nghiệm, trường hợp bình thường dễ nhầm và phạm vi hỗ trợ model. Bảng Markdown sinh từ catalog qua `render_criteria_spec.py`; có kiểm tra chống lệch. Phân biệt behavior_signal/external_fact/contextual_review và matched/not_matched/insufficient_data; không gắn matched thành nhãn anomaly. Làm rõ tiền settled/projected, baseline trước cửa sổ xét, timestamps/availability, episode không trùng và điều kiện dùng watchlist. Bỏ bảng điểm cộng tối đa 135 chưa được hiệu chỉnh; giữ risk_score/criterion_results/decision riêng. Các tham số mới là đề xuất nghiên cứu, giá trị null ngăn matching đầy đủ đến khi có cấu hình nghiệp vụ.
+
+Pipeline `make dataset-eda` dùng `configs/criteria-eda-v2.json`, output `outputs/contextual-v5-device/seed-20261002/eda/criteria-v2/`. Dùng lại raw/feature/checkpoint 500k của review-v2, không đổi generator, nhãn, scaler, model hay threshold; config train đã preregister giữ nguyên SHA. Config EDA trỏ đúng checkpoint 7d thay vì reference 35 chiều cũ. Sửa lỗi grouping của `type_mean_reference_reliable`: phải thuộc amount_reference, không phải one-hot transaction_type.
+
+- [x] 87 tests + 14 subtests pass; causal checks trong EDA pass 15 tests; catalog đủ 49 ID, nội dung Markdown khớp JSON; test missing-vs-false, shared device count, calendar boundary và tri-state source readiness.
+- [x] Dataset EDA Matplotlib: 500k, 10k anomaly, đủ năm nghiệp vụ; 4 trang tổng quan/phân bố amount/hành vi-funding/graph requests. Không thêm model hoặc diagnostic rule F1.
+- [x] Feature EDA: 10 screening invariants pass, toàn bộ payload khớp checkpoint; 58 transaction/12 node dimensions. 13 transaction constants và 52 correlation candidates, gồm nhiều cặp hằng/giá trị phổ biến. Không tự động xóa feature.
+- [x] Grouped permutation trên 7.334 validation request (132 positive), 64 hourly contexts, 3 repeat; baseline AP subset 0.98394, tái hiện prediction đã freeze. Mean AP drops: velocity 0.54675; transfer neighborhood 0.27068; habits 0.19231; receiver novelty 0.15044; amount references 0.13735; device context 0.000947; auth 0. Graph/node embeddings cố định, không phải unique/causal importance hoặc retrained ablation.
+- [x] Criteria source readiness: 25 sources_present, 15 partial_sources, 9 missing_sources. Đây là nhóm nguồn có xuất hiện, không phải 25 tiêu chí đã thực thi/khớp hoặc đủ per-account support. EDA không tạo criterion labels/matches hay score lại test.
+- [x] Device/platform 100% request, auth 0%; 23.731 device, 0 device dùng chung account, max 1 account/device. Generator chưa mô phỏng shared-device/login/security events.
+- [x] Train calendar coverage cho A01 90d và A03 91d bằng 0; validation/test mới có thể đủ ngày. A04 cấu hình đề xuất 210d vượt dataset 181d. Đây là upper bound calendar, không thay support/watermark. Mean7d reliable trên train khoảng 54.21% so median30d 88.43%; cold start train 7.95%, holdout 0%.
+- [ ] Bổ sung prehistory/nguồn quan sát, trường hợp bình thường dễ nhầm và kịch bản cần thiết trước khi mở rộng feature/nhãn. Feature mới phải có causal tests và protocol validation/multi-seed; dùng holdout mới để đánh giá cuối, không tiếp tục tuning trên test đã xem.
+
+Báo cáo: `dataset/dataset_eda.pdf`, `features/report.md` + `feature_audit.pdf`, `criteria/report.md` + `criteria_readiness.pdf`, và CSV coverage/correlation trong output root. Các metric GATv2 cũ chỉ được đọc để mô tả, không có train hoặc thay threshold ở bước này.

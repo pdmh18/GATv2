@@ -3,7 +3,8 @@ import math
 from collections import Counter, defaultdict, deque
 from datetime import datetime
 from itertools import groupby
-from .history import RollingMedian
+from .history import RollingMedian, RollingMean
+from .request_context import context_names, context_values, validate_context_options
 
 TYPES = ('TRANSFER', 'CASH_IN', 'CASH_OUT', 'PAYMENT', 'DEBIT', 'unknown')
 CHANNELS = ('mobile', 'web', 'desktop', 'unknown')
@@ -28,10 +29,16 @@ def names(options):
                'new_receiver', 'channel_prior_fraction', 'hour_prior_fraction',
                'log_dst_transfer_attempt_distinct_sources', 'log_src_transfer_attempt_distinct_sources',
                'log_src_received_settled_transfer_amount', 'log_src_transfer_attempt_count', 'cold_start']
-            + [f'type_{v}' for v in TYPES] + [f'channel_{v}' for v in CHANNELS])
+            + [f'type_{v}' for v in TYPES] + [f'channel_{v}' for v in CHANNELS]
+            + (['log_src_type_completed_mean_amount', 'log_src_type_mean_count', 'has_type_mean_history',
+                'log_amount_to_type_mean', 'type_mean_reference_reliable'] if options.get('mean_window_seconds') else [])
+            + context_names(options))
 
 
 def validate_options(options):
+    validate_context_options(options)
+    if options.get('mean_window_seconds') is not None and (type(options['mean_window_seconds']) is not int or options['mean_window_seconds']<=0):
+        raise ValueError('mean_window_seconds must be a positive integer')
     windows = options['request_windows_seconds']
     if not windows or len(set(windows)) != len(windows) or any(type(v) is not int or v <= 0 for v in windows):
         raise ValueError('Request windows must be distinct positive integer seconds')
@@ -51,6 +58,8 @@ class State:
         self.timezone = timezone
         self.requests = {w: defaultdict(deque) for w in options['request_windows_seconds']}
         self.completed = defaultdict(lambda: RollingMedian(options['amount_window_seconds']))
+        self.means=defaultdict(lambda: RollingMean(options['mean_window_seconds'])) if options.get('mean_window_seconds') else None
+        self.devices=defaultdict(set)
         self.total = Counter()
         self.last = {}
         self.receivers = defaultdict(set)
@@ -98,12 +107,21 @@ class State:
                    math.log1p(len(self.outgoing[src])), float(n < self.options['cold_start_min_requests'])]
         values += [float(v == (kind if kind in TYPES else 'unknown')) for v in TYPES]
         values += [float(v == (channel if channel in CHANNELS else 'unknown')) for v in CHANNELS]
+        if self.means is not None:
+            mean_count,mean=self.means[(src,kind)].at(at)
+            mean_reliable=mean_count>=self.options['amount_min_history']
+            values += [math.log1p(mean),math.log1p(mean_count),float(mean_count>0),
+                       math.log1p(p['amount']/mean) if mean_reliable and mean>0 else 0.,float(mean_reliable)]
+        if self.options.get('include_request_context',False):
+            values += context_values(p,self.devices[src],self.options)
         return values
 
     def observe(self, event):
         p, at, event_type = event['payload'], microseconds(event['occurred_at']), event['event_type']
         src, dst = p['sourceAccountId'], p['destinationAccountId']
         if event_type in REQUESTS:
+            if self.options.get('include_request_context',False) and p.get('device_id') is not None:
+                self.devices[src].add(p['device_id'])
             for table in self.requests.values():
                 table[src].append(at)
             self.total[src] += 1
@@ -120,6 +138,7 @@ class State:
         elif event_type in COMPLETED:
             kind = 'TRANSFER' if event_type == 'TransferCompleted' else p.get('transactionType', 'unknown')
             self.completed[(src, kind)].add(at, p['amount'])
+            if self.means is not None:self.means[(src,kind)].add(at,p['amount'])
             if event_type == 'TransferCompleted':
                 self.received[dst].append((at, p['amount']))
 

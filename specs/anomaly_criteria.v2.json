@@ -1,0 +1,1046 @@
+{
+  "schema_version": 2,
+  "profile": "banking-criteria-v2",
+  "threshold_policy": "Exploratory configuration, not empirically calibrated; null thresholds disable complete matching.",
+  "label_policy": "Criterion outcomes, scenario roles and verified fraud outcomes are separate. Later labels are allowed; later information is forbidden in earlier features.",
+  "history_policy": "Strict timestamps < t; completed money flow only. Request/projected branches include current explicitly. All same-timestamp requests share prior state.",
+  "criteria": [
+    {
+      "id": "A01",
+      "name": "Giá trị một giao dịch tăng đột biến",
+      "kind": "behavior_signal",
+      "unit": "transaction",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "amount >= minimum_amount AND amount / median(completed amounts cùng source+type trong [t-90d,t)) > ratio; cần đủ support.",
+      "requires": [
+        "request_history",
+        "settled_history"
+      ],
+      "normal_counterexample": "Khách mua tài sản hoặc thanh toán khoản lớn đã có ngữ cảnh hợp lệ.",
+      "minimum_calendar_history_days": 90,
+      "parameters": {
+        "minimum_amount": 10000000,
+        "ratio": 5,
+        "reference_days": 90,
+        "min_reference_transactions": 5
+      },
+      "existing_model_support": "Đã có amount/median theo source+type nhưng reference hiện tại 30d, không phải A01-90d.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "A02",
+      "name": "Tổng giá trị trong 24 giờ bất thường",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Tổng settled tiền vào và tiền ra được xét riêng trên [t-24h,t); so với median 28 cửa sổ 24h liền trước, không chồng cửa sổ hiện tại. Điều kiện định lượng: total >= minimum_amount AND total/reference_median > ratio, reference_median>0.",
+      "requires": [
+        "settled_history"
+      ],
+      "normal_counterexample": "Ngày trả lương, thu hộ hoặc doanh thu tăng đã được giải thích.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "window_seconds": 86400,
+        "reference_periods": 28,
+        "ratio": 3,
+        "minimum_amount": null
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "A03",
+      "name": "Tổng giá trị trong 7 ngày tăng bất thường",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Tổng settled vào/ra riêng trong [t-7d,t); so median 12 kỳ 7d liền trước [t-91d,t-7d). Điều kiện định lượng: total >= minimum_amount AND total/reference_median > ratio, reference_median>0.",
+      "requires": [
+        "settled_history"
+      ],
+      "normal_counterexample": "Chi trả định kỳ hoặc doanh thu theo mùa.",
+      "minimum_calendar_history_days": 91,
+      "parameters": {
+        "window_seconds": 604800,
+        "reference_periods": 12,
+        "ratio": 3,
+        "minimum_amount": null
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "A04",
+      "name": "Tổng giao dịch trong 30 ngày tăng đột biến",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Tổng settled vào/ra riêng trên 30d; so median 6 kỳ 30d trước đó. Cần hồ sơ chu kỳ kinh doanh/thu nhập để xác nhận ngữ cảnh. Điều kiện định lượng: total >= minimum_amount AND total/reference_median > ratio, reference_median>0.",
+      "requires": [
+        "settled_history",
+        "observed_profile"
+      ],
+      "normal_counterexample": "Doanh thu theo mùa, khoản thanh toán định kỳ lớn.",
+      "minimum_calendar_history_days": 210,
+      "parameters": {
+        "window_days": 30,
+        "reference_periods": 6,
+        "ratio": 3,
+        "minimum_amount": null
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "B01",
+      "name": "Số lượng giao dịch trong thời gian ngắn tăng cao",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "count prior requests 1h + request hiện tại >= count AND vượt ratio lần median count của 28 khoảng cùng giờ địa phương trong 28 ngày trước.",
+      "requires": [
+        "request_history"
+      ],
+      "normal_counterexample": "Merchant xử lý đơn trong giờ cao điểm.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "window_seconds": 3600,
+        "count": 10,
+        "ratio": 3,
+        "reference_days": 28
+      },
+      "existing_model_support": "Có count request 1h; chưa có baseline cùng giờ 28 ngày.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "B02",
+      "name": "Tần suất giao dịch trong ngày bất thường",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "count prior requests 24h + request hiện tại >= count; median count 28 kỳ 24h liền trước < baseline_max.",
+      "requires": [
+        "request_history"
+      ],
+      "normal_counterexample": "Ngày mở bán hoặc kỳ thu phí.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "window_seconds": 86400,
+        "count": 30,
+        "baseline_max": 5,
+        "reference_periods": 28
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "B03",
+      "name": "Nhận tiền từ nhiều nguồn trong thời gian ngắn",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "distinct settled TRANSFER source tới account trong [t-30m,t) >= sources AND settled incoming amount >= minimum_amount.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Cửa hàng hoặc thu hộ nhận nhiều người trả.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 1800,
+        "sources": 5,
+        "minimum_amount": null
+      },
+      "existing_model_support": "Có distinct transfer attempts 10m, không tương đương settled inflow 30m.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "B04",
+      "name": "Chuyển tiền liên tiếp cho nhiều người nhận",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "distinct recipients của settled outgoing TRANSFER trên 1h (hoặc projected khi request TRANSFER hiện tại thành công) >= recipients và vượt baseline 28 kỳ.",
+      "requires": [
+        "request_history",
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Trả lương hoặc chi trả nhiều đối tác.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "window_seconds": 3600,
+        "recipients": 10,
+        "ratio": 3,
+        "reference_periods": 28
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "B05",
+      "name": "Giao dịch dồn dập",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "count prior requests 5m + request hiện tại >= count AND tổng amount yêu cầu 5m gồm hiện tại >= minimum_amount. Attempt không đồng nghĩa tiền đã chuyển.",
+      "requires": [
+        "request_history"
+      ],
+      "normal_counterexample": "Tách thanh toán hợp lệ hoặc thao tác lại sau lỗi.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 300,
+        "count": 5,
+        "minimum_amount": null
+      },
+      "existing_model_support": "Có prior request count 300s; phải cộng current khi đánh giá request.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "B06",
+      "name": "Tái hoạt động sau thời gian dài không giao dịch",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Đã quan sát tài khoản >=90d; trước đợt mới không có request >=90d; trong 1h đầu tái hoạt động có >=5 settled sources và >=3 settled outgoing transfers.",
+      "requires": [
+        "request_history",
+        "settled_history",
+        "account_lifecycle"
+      ],
+      "normal_counterexample": "Tài khoản ngủ đông được dùng lại cho mục đích hợp lệ.",
+      "minimum_calendar_history_days": 90,
+      "parameters": {
+        "dormant_days": 90,
+        "episode_seconds": 3600,
+        "sources": 5,
+        "outgoing_count": 3
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "C01",
+      "name": "Chuyển đi nhanh sau khi nhận tiền",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "R60 = settled outgoing TRANSFER+CASH_OUT amount / settled incoming TRANSFER amount trong [t-60m,t); R60>=ratio và inflow>=minimum_inflow. Đây là tỷ lệ luồng tiền, không khẳng định truy nguyên tiền. Request variant thêm amount hiện tại vào tử projected, không sửa settled numerator.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Thu hộ rồi chi hộ, chuyển tiền giữa tài khoản của chính khách.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 3600,
+        "ratio": 0.8,
+        "minimum_inflow": null
+      },
+      "existing_model_support": "Có received settled TRANSFER 10m và outgoing attempts; chưa có R60 settled/projected.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "C02",
+      "name": "Chuyển tiếp phần lớn tiền trong ngày",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "end_of_day",
+      "formula": "Sau khi ngày địa phương D kết thúc: outflow TRANSFER+CASH_OUT / inflow TRANSFER trong D >=ratio, inflow>=minimum_inflow và closing_balance/inflow < remaining_ratio.",
+      "requires": [
+        "settled_history",
+        "balance_snapshots"
+      ],
+      "normal_counterexample": "Thu hộ hoặc thanh toán nghĩa vụ trong ngày.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "ratio": 0.9,
+        "remaining_ratio": 0.1,
+        "minimum_inflow": null
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "C03",
+      "name": "Nhiều nguồn tiền vào, ít nguồn tiền ra",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Trong 30m trước đợt nhận kết thúc có >=sources settled source khác nhau; sau đó trong <=60m có 1..max_recipients settled outgoing recipients và out/in >=ratio.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Đơn vị thu hộ tập trung và thanh toán cho nhà cung cấp.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "incoming_seconds": 1800,
+        "forward_seconds": 3600,
+        "sources": 5,
+        "max_recipients": 3,
+        "ratio": 0.8
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "C04",
+      "name": "Tài khoản trung chuyển có số dư thấp",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "end_of_day",
+      "formula": "Cuối ngày: closing_balance / settled inflow TRANSFER <ratio, inflow>=minimum_inflow, distinct sources>=sources; ít nhất repeat_days ngày trong 7d.",
+      "requires": [
+        "settled_history",
+        "balance_snapshots"
+      ],
+      "normal_counterexample": "Tài khoản chuyên thu/chi có số dư mục tiêu thấp.",
+      "minimum_calendar_history_days": 7,
+      "parameters": {
+        "ratio": 0.1,
+        "sources": 5,
+        "repeat_days": 3,
+        "minimum_inflow": null
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "C05",
+      "name": "Chuỗi nhận và chuyển tiếp lặp lại",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Số episode C03 matched đã đóng, không trùng transaction_id, trong 7d >= episodes. Episode mới chỉ mở sau episode trước kết thúc.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Quy trình thu hộ/chi hộ lặp định kỳ.",
+      "minimum_calendar_history_days": 7,
+      "parameters": {
+        "window_days": 7,
+        "episodes": 3
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "C06",
+      "name": "Rút tiền mặt ngay sau khi nhận",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Settled CASH_OUT amount trong 60m / settled incoming TRANSFER amount trong cùng 60m >=ratio và inflow>=minimum_inflow. Đánh giá projected riêng tại request CASH_OUT.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Rút tiền chi tiêu sau khi nhận lương.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 3600,
+        "ratio": 0.8,
+        "minimum_inflow": null
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D01",
+      "name": "Nhận tiền từ đối tác có trong danh sách cảnh báo",
+      "kind": "external_fact",
+      "unit": "transaction",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Counterparty của giao dịch có watchlist record đã known_at<=t và effective_from<=t<effective_to, trạng thái active.",
+      "requires": [
+        "watchlist_asof"
+      ],
+      "normal_counterexample": "Danh sách cũ, nhầm định danh hoặc kết quả đã được gỡ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D02",
+      "name": "Nhận tiền từ nhiều tài khoản đáng ngờ",
+      "kind": "external_fact",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Có >=sources distinct settled incoming sources với watchlist active as-of từng thời điểm nhận trong 24h; không đếm nhiều giao dịch cùng nguồn thành nhiều nguồn.",
+      "requires": [
+        "watchlist_asof",
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Một đối tác có cảnh báo cần rà soát, chưa đủ kết luận bên nhận.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 86400,
+        "sources": 4
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D03",
+      "name": "Số lượng đối tác mới tăng đột biến",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "distinct counterparties lần đầu quan sát trong 24h >=count và >ratio lần baseline median 28 kỳ 24h trước. Known-before-window lấy toàn prior history, cold start là unknown.",
+      "requires": [
+        "request_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Khách mới mở cửa hàng hoặc tăng tập đối tác hợp lệ.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "window_seconds": 86400,
+        "count": 10,
+        "ratio": 3,
+        "reference_periods": 28
+      },
+      "existing_model_support": "Có new_receiver từng request; chưa có distinct new counterparties 24h và baseline.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D04",
+      "name": "Giao dịch tập trung vào một đối tác bất thường",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "max recipient settled outgoing TRANSFER share trong 24h >share; recipient mới trước cửa sổ hoặc watchlisted as-of t. Nhánh mới và watchlist báo riêng, không dùng OR để che thiếu watchlist.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Thanh toán nhà cung cấp mới hoặc mua tài sản.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 86400,
+        "share": 0.8
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D05",
+      "name": "Quan hệ chuyển tiền khép kín",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Có >=cycles chu trình 3 node A→B→C→A, cạnh settled TRANSFER với timestamp tăng nghiêm ngặt và span<=7d. Chu trình đếm không trùng transaction; mục đích kinh tế chưa thể suy ra.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Hoàn trả, phân bổ quỹ hoặc luân chuyển nội bộ hợp lệ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "max_span_days": 7,
+        "cycles": 2
+      },
+      "existing_model_support": "Graph model bidirectional/deduplicated không giữ đủ chiều/thứ tự để xác nhận D05.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D06",
+      "name": "Giao dịch đảo chiều thường xuyên",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Trong 24h, một cặp có >=round_trips cặp settled A→B rồi B→A; ghép FIFO không dùng lại tx, mỗi cặp cách nhau<=1h và relative amount difference<=tolerance.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Hoàn tiền hoặc điều chuyển hợp lệ giữa hai tài khoản.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 86400,
+        "pair_seconds": 3600,
+        "round_trips": 3,
+        "tolerance": 0.1
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D07",
+      "name": "Một tài khoản nhận rồi phân phối lại",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Trong 24h có >=sources distinct settled TRANSFER sources và >=recipients distinct settled outgoing recipients; báo cùng out/in ratio và độ trễ, không suy ra mục đích.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Payroll, sàn thanh toán hoặc tài khoản thu hộ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 86400,
+        "sources": 10,
+        "recipients": 5
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "D08",
+      "name": "Mạng lưới tài khoản có rủi ro liên quan",
+      "kind": "external_fact",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Có >=neighbors đối tác 1-hop trên settled directed graph 7d mang cảnh báo đã biết tại t; chỉ lan truyền từ evidence as-of, không lan từ anomaly labels offline.",
+      "requires": [
+        "watchlist_asof",
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Quan hệ gián tiếp không chứng minh chủ tài khoản có hành vi sai.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_days": 7,
+        "neighbors": 3
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "E01",
+      "name": "Vòng quay tiền tăng bất thường",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "end_of_day",
+      "formula": "Sau ngày kết thúc: gross settled inflow+outflow / median gross 28 ngày trước >=ratio, opening/closing balance biến động<=balance_delta_ratio; cần loại trừ điều chỉnh sổ cái.",
+      "requires": [
+        "settled_history",
+        "balance_snapshots"
+      ],
+      "normal_counterexample": "Tài khoản thanh toán trung gian có vòng quay cao hợp lệ.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "reference_days": 28,
+        "ratio": 3,
+        "balance_delta_ratio": 0.1
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "E02",
+      "name": "Số dư không tương xứng với quy mô giao dịch",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "end_of_day",
+      "formula": "Gross settled flow 24h / median opening balance 28 ngày trước >=ratio, baseline balance>0; lặp >=repeat_days trong 7d và xét hồ sơ hoạt động.",
+      "requires": [
+        "settled_history",
+        "balance_snapshots",
+        "observed_profile"
+      ],
+      "normal_counterexample": "Merchant có số dư mục tiêu thấp.",
+      "minimum_calendar_history_days": 35,
+      "parameters": {
+        "reference_days": 28,
+        "ratio": 10,
+        "repeat_days": 3
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "E03",
+      "name": "Nhận tiền nhưng không có hành vi chi tiêu thông thường",
+      "kind": "contextual_review",
+      "unit": "account_window",
+      "evaluation_mode": "periodic_review",
+      "formula": "Trong 30d có >=sources distinct settled incoming sources và PAYMENT+DEBIT spend / settled total outflow <spend_share; cần mục đích tài khoản và khả năng quan sát chi tiêu ngoài hệ thống.",
+      "requires": [
+        "settled_history",
+        "observed_profile",
+        "purpose_evidence"
+      ],
+      "normal_counterexample": "Tài khoản tiết kiệm hoặc tài khoản chuyên thu không dùng chi tiêu.",
+      "minimum_calendar_history_days": 30,
+      "parameters": {
+        "window_days": 30,
+        "sources": 5,
+        "spend_share": 0.05
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "E04",
+      "name": "Nguồn tiền không tương xứng hồ sơ",
+      "kind": "contextual_review",
+      "unit": "account_window",
+      "evaluation_mode": "periodic_review",
+      "formula": "Settled inflow 30d / mức thu nhập hoặc doanh thu đã xác minh, có hiệu lực tại t, >ratio; thiếu hồ sơ là insufficient_data.",
+      "requires": [
+        "settled_history",
+        "observed_profile"
+      ],
+      "normal_counterexample": "Bán tài sản, khoản vay hoặc doanh thu thời vụ có giải thích.",
+      "minimum_calendar_history_days": 30,
+      "parameters": {
+        "window_days": 30,
+        "ratio": 3
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "E05",
+      "name": "Tiền vào và ra tương ứng bất thường",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Ghép FIFO không dùng lại settled incoming TRANSFER và outgoing TRANSFER/CASH_OUT cùng account, gap<=1h, amount difference<=tolerance; >=pairs cặp trong 24h. Không gọi là truy nguyên tiền.",
+      "requires": [
+        "settled_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Thu hộ rồi chi hộ theo từng đơn.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 86400,
+        "pair_seconds": 3600,
+        "pairs": 3,
+        "tolerance": 0.1
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "E06",
+      "name": "Hoạt động dồn vào một số khoảng ngắn",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "max request count của cửa sổ 5m trong 24h / count requests 24h >=share và tổng count>=min_count; so với baseline 28 ngày trước.",
+      "requires": [
+        "request_history"
+      ],
+      "normal_counterexample": "Giờ mở bán hoặc trả lương theo đợt.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "short_seconds": 300,
+        "long_seconds": 86400,
+        "share": 0.8,
+        "min_count": 10,
+        "reference_days": 28
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "F01",
+      "name": "Giao dịch vào giờ bất thường",
+      "kind": "behavior_signal",
+      "unit": "transaction",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Giờ request hiện tại có prior fraction <max_fraction trong 30d và prior support>=min_requests; ban đêm không tự là rủi ro.",
+      "requires": [
+        "request_history"
+      ],
+      "normal_counterexample": "Khách làm ca đêm hoặc có lịch hoạt động thay đổi.",
+      "minimum_calendar_history_days": 30,
+      "parameters": {
+        "reference_days": 30,
+        "max_fraction": 0.01,
+        "min_requests": 20
+      },
+      "existing_model_support": "Có hour_prior_fraction toàn lịch sử, chưa window 30d.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "F02",
+      "name": "Đăng nhập từ thiết bị mới",
+      "kind": "behavior_signal",
+      "unit": "transaction",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Có login thành công từ device chưa biết trước login; trong 1h tiếp theo request có amount/median>amount_ratio hoặc new_receiver. Account chưa có device history là insufficient_data.",
+      "requires": [
+        "request_history",
+        "settled_history",
+        "device_history",
+        "login_history"
+      ],
+      "normal_counterexample": "Khách đổi điện thoại rồi giao dịch hợp lệ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "login_to_request_seconds": 3600,
+        "amount_ratio": 5
+      },
+      "existing_model_support": "Có new_device tại transaction request, chưa có login events để xác nhận F02.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "F03",
+      "name": "Một thiết bị liên quan đến nhiều tài khoản",
+      "kind": "behavior_signal",
+      "unit": "device_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "distinct accounts có authenticated session trên cùng device trong 24h >=accounts; device fingerprint phải ổn định, có confidence/source.",
+      "requires": [
+        "device_history",
+        "login_history"
+      ],
+      "normal_counterexample": "Thiết bị gia đình hoặc người được ủy quyền quản lý nhiều tài khoản.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 86400,
+        "accounts": 3
+      },
+      "existing_model_support": "Dataset hiện sinh ID device theo account, không có shared-device graph.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "F04",
+      "name": "Địa điểm đăng nhập thay đổi bất thường",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Hai login thành công liên tiếp có reliable geo; distance/travel_time >max_speed, loại vị trí không chắc chắn/VPN theo policy. Không suy ra geo chỉ từ IP thô.",
+      "requires": [
+        "login_history",
+        "geo_history"
+      ],
+      "normal_counterexample": "VPN, sai định vị hoặc mạng di động.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "max_speed_kmh": 900
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "F05",
+      "name": "Thay đổi bảo mật trước giao dịch lớn",
+      "kind": "behavior_signal",
+      "unit": "transaction",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Security change event đã commit trước request <=1h và request amount/median>ratio hoặc new_receiver; ghi chính xác loại thay đổi, không dùng terminal auth_verified của request.",
+      "requires": [
+        "security_changes",
+        "request_history",
+        "settled_history"
+      ],
+      "normal_counterexample": "Đổi mật khẩu hoặc số liên hệ theo quy trình hợp lệ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "change_to_request_seconds": 3600,
+        "amount_ratio": 5
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "F06",
+      "name": "Nhiều tài khoản có dấu hiệu điều khiển chung",
+      "kind": "behavior_signal",
+      "unit": "entity_group",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Nhóm >=accounts có shared authenticated device/session, request trong burst_seconds và có mẫu đối tác/amount liên quan; ghi evidence của từng quan hệ, không kết luận điều khiển chung.",
+      "requires": [
+        "device_history",
+        "login_history",
+        "request_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Nhóm khách dùng thiết bị được ủy quyền hoặc quầy dịch vụ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "accounts": 3,
+        "burst_seconds": 300
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "F07",
+      "name": "Không thể liên hệ để xác minh",
+      "kind": "external_fact",
+      "unit": "account_window",
+      "evaluation_mode": "verification",
+      "formula": "VerificationAttempt có kết quả không liên hệ được theo protocol/version, known_at<=t; không suy ra từ thiếu metadata.",
+      "requires": [
+        "contact_checks"
+      ],
+      "normal_counterexample": "Khách tạm thời không nghe máy.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "G01",
+      "name": "Thông tin tài khoản không khớp dữ liệu định danh",
+      "kind": "external_fact",
+      "unit": "customer_or_account",
+      "evaluation_mode": "verification",
+      "formula": "IdentityCheck cá nhân trả mismatch với nguồn/version và known_at<=t.",
+      "requires": [
+        "identity_checks"
+      ],
+      "normal_counterexample": "Sai khác do dữ liệu cũ hoặc lỗi nhập liệu.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "G02",
+      "name": "Thông tin tổ chức không khớp",
+      "kind": "external_fact",
+      "unit": "customer_or_account",
+      "evaluation_mode": "verification",
+      "formula": "BusinessRegistryCheck tổ chức trả mismatch, nguồn/version và known_at<=t.",
+      "requires": [
+        "identity_checks"
+      ],
+      "normal_counterexample": "Thông tin doanh nghiệp đang cập nhật.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "G03",
+      "name": "Thông tin người đại diện không khớp",
+      "kind": "external_fact",
+      "unit": "customer_or_account",
+      "evaluation_mode": "verification",
+      "formula": "RepresentativeCheck trả mismatch, định danh người đại diện và known_at<=t.",
+      "requires": [
+        "identity_checks"
+      ],
+      "normal_counterexample": "Thay đổi người đại diện hợp lệ chưa đồng bộ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "G04",
+      "name": "Tài khoản nằm trong danh sách mua bán",
+      "kind": "external_fact",
+      "unit": "customer_or_account",
+      "evaluation_mode": "verification",
+      "formula": "Evidence tài khoản được rao bán đã xác minh nguồn, timestamp, độ tin cậy và ánh xạ đúng account.",
+      "requires": [
+        "watchlist_asof"
+      ],
+      "normal_counterexample": "Tin giả hoặc nhầm số tài khoản.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "G05",
+      "name": "Chủ tài khoản thuộc danh sách cảnh báo",
+      "kind": "external_fact",
+      "unit": "customer_or_account",
+      "evaluation_mode": "verification",
+      "formula": "Customer/account/representative watchlist active as-of t, có source/version và thời điểm hệ thống biết.",
+      "requires": [
+        "watchlist_asof"
+      ],
+      "normal_counterexample": "Nhầm định danh hoặc bản ghi hết hiệu lực.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "G06",
+      "name": "Giao dịch không phù hợp hồ sơ",
+      "kind": "contextual_review",
+      "unit": "account_window",
+      "evaluation_mode": "periodic_review",
+      "formula": "Đối chiếu amount/frequency/counterparties theo 30d với hồ sơ thu nhập/nghề nghiệp/doanh thu có hiệu lực trước t; cần reviewer outcome để kết luận không phù hợp.",
+      "requires": [
+        "observed_profile",
+        "request_history",
+        "settled_history"
+      ],
+      "normal_counterexample": "Khách thay đổi công việc hoặc mở hoạt động kinh doanh.",
+      "minimum_calendar_history_days": 30,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "G07",
+      "name": "Mối quan hệ tài khoản không rõ ràng",
+      "kind": "contextual_review",
+      "unit": "account_window",
+      "evaluation_mode": "verification",
+      "formula": "Reviewer xác minh mục đích/nguồn tiền/quan hệ đối tác; chỉ ghi outcome đã biết tại t, chưa xác minh là unknown.",
+      "requires": [
+        "purpose_evidence"
+      ],
+      "normal_counterexample": "Đối tác mới hợp lệ chưa cung cấp chứng từ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "H01",
+      "name": "Nhiều giao dịch có mẫu hình gần giống nhau",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "request_or_monitor",
+      "formula": "Trong 1h có >=count requests với amount sai lệch<=tolerance quanh amount đại diện và cùng nhóm đối tác; đây là mẫu lặp, không kết luận giả tạo.",
+      "requires": [
+        "request_history",
+        "directed_timeline"
+      ],
+      "normal_counterexample": "Thanh toán theo bảng giá hoặc hóa đơn cùng mệnh giá.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {
+        "window_seconds": 3600,
+        "count": 5,
+        "tolerance": 0.01
+      },
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "H02",
+      "name": "Giao dịch lặp lại không rõ mục đích kinh tế",
+      "kind": "contextual_review",
+      "unit": "account_window",
+      "evaluation_mode": "verification",
+      "formula": "Có D05/D06 và bằng chứng reviewer rằng không có nghĩa vụ/mục đích tương ứng; graph pattern đơn lẻ không đủ kết luận.",
+      "requires": [
+        "settled_history",
+        "directed_timeline",
+        "purpose_evidence"
+      ],
+      "normal_counterexample": "Luân chuyển quỹ hoặc hoàn trả hợp lệ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "H03",
+      "name": "Hoạt động nhằm nhận thưởng bất thường",
+      "kind": "contextual_review",
+      "unit": "account_window",
+      "evaluation_mode": "verification",
+      "formula": "Reward context có program_id/version; hoạt động đủ điều kiện thưởng tăng bất thường và có kết quả xác minh giao dịch không thực chất.",
+      "requires": [
+        "reward_context",
+        "request_history",
+        "purpose_evidence"
+      ],
+      "normal_counterexample": "Chiến dịch kích cầu hợp lệ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "H04",
+      "name": "Nhiều giao dịch bị hủy hoặc điều chỉnh",
+      "kind": "behavior_signal",
+      "unit": "account_window",
+      "evaluation_mode": "settlement_or_monitor",
+      "formula": "Trong 24h: failed+cancelled terminal count / requests đã có terminal >=ratio, số terminal>=min_count và vượt baseline 28 ngày. Refund/adjustment là nhánh riêng, cần refund events; pending không là failure.",
+      "requires": [
+        "request_history",
+        "terminal_history",
+        "refund_history"
+      ],
+      "normal_counterexample": "Sự cố hạ tầng, khách hủy hoặc hoàn tiền hợp lệ.",
+      "minimum_calendar_history_days": 29,
+      "parameters": {
+        "window_seconds": 86400,
+        "ratio": 0.5,
+        "min_count": 10,
+        "reference_days": 28
+      },
+      "existing_model_support": "Có failed/cancelled terminals; chưa có refund/adjustment events. Chỉ có thể xét nhánh failure riêng.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    },
+    {
+      "id": "H05",
+      "name": "Hành vi không phù hợp mục đích khai báo",
+      "kind": "contextual_review",
+      "unit": "account_window",
+      "evaluation_mode": "verification",
+      "formula": "D07 kết hợp hồ sơ mục đích tài khoản và reviewer xác nhận không phù hợp; không gán gian lận từ fan-in/fan-out đơn lẻ.",
+      "requires": [
+        "settled_history",
+        "directed_timeline",
+        "observed_profile",
+        "purpose_evidence"
+      ],
+      "normal_counterexample": "Tài khoản thu hộ được phép hoặc thay đổi mục đích hợp lệ.",
+      "minimum_calendar_history_days": 0,
+      "parameters": {},
+      "existing_model_support": "Cần bổ sung feature/công thức; không phải luật đã triển khai.",
+      "outcome": "matched/not_matched/insufficient_data",
+      "label_policy": "Không tự suy ra anomaly/fraud label từ matched."
+    }
+  ]
+}

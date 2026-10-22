@@ -29,6 +29,25 @@ class EvaluationTests(unittest.TestCase):
         self.assertAlmostEqual(points['ap'],5/6)
         self.assertRaises(ValueError,curve_points,[.1,.2],[1,1])
 
+    def test_device_mask_matches_zeroed_input_without_changing_parameters(self):
+        import tempfile
+        from fraud_pipeline.registry.save_load import save,load
+        options=dict(kind='gatv2',in_dim=12,edge_dim=35,hidden_dim=32,heads=4,num_layers=2,dropout=0.)
+        torch.manual_seed(42);original=build_model(options).eval()
+        torch.manual_seed(42);masked=build_model(dict(options,masked_feature_indices=[2,4])).eval()
+        self.assertEqual(sum(p.numel() for p in original.parameters()),sum(p.numel() for p in masked.parameters()))
+        for name,value in original.state_dict().items():torch.testing.assert_close(value,masked.state_dict()[name])
+        x=torch.randn(4,12);edges=torch.tensor([[0,1,2],[1,2,3]]);features=torch.randn(3,35);copy=features.clone()
+        zeros=features.clone();zeros[:,[2,4]]=0
+        expected=original(x=x,edge_index=edges,target_edge_index=edges,edge_features=zeros)
+        actual=masked(x=x,edge_index=edges,target_edge_index=edges,edge_features=features)
+        torch.testing.assert_close(actual,expected);torch.testing.assert_close(features,copy)
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'mask.pt'
+            save(masked,path,model_config=dict(options,masked_feature_indices=[2,4]),metadata={'feature_manifest_sha256':'fixture'})
+            restored,_=load(path,expected_feature_sha256='fixture')
+            torch.testing.assert_close(restored(x=x,edge_index=edges,target_edge_index=edges,edge_features=features),expected)
+
     def test_ablation_does_not_depend_on_graph(self):
         torch.manual_seed(1)
         x=torch.randn(4,12);features=torch.randn(3,35)

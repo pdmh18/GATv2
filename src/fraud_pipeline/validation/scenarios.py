@@ -10,10 +10,10 @@ SCENARIOS = {'normal', 'contextual_amount', 'velocity_burst', 'graph_fan_in', 'r
 
 def validate_scenarios(tables, manifest, transactions, labels, audit):
     version = manifest.get('scenario_profile')
-    if version not in {'contextual-v3', 'contextual-v4'}:
+    if version not in {'contextual-v3', 'contextual-v4', 'contextual-v5-device'}:
         return
     bounds = None
-    if version == 'contextual-v4':
+    if version in {'contextual-v4','contextual-v5-device'}:
         config = manifest.get('pipeline_config', {})
         stages = config.get('stages', []) if isinstance(config, dict) else []
         for stage in stages if isinstance(stages, list) else []:

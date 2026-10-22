@@ -601,3 +601,72 @@ python scripts/evaluate_gatv2_splits.py
 ```
 
 Dùng cùng best checkpoint và threshold đã chọn trên validation cho cả ba tập, eval mode không dropout. Train cần thu thêm predictions; validation/test dùng predictions đã lưu. Output `gatv2_partitions/` lưu report và predictions từng tập. Bộ hình chính vẫn 3 trang: PR/ROC cả ba tập, ba confusion matrix phân biệt rõ split, và tỷ lệ/số lượng split cùng bảng chỉ số. `plot_evaluation.py` tự dùng bộ đầy đủ khi có `gatv2_partitions/report.json`. Tỷ lệ config 50/30/20 theo ngày liên tục, không phải lấy tỷ lệ trong mỗi ngày; tỷ lệ số request thực tế gần đúng vì lưu lượng ngày khác nhau.
+
+
+### Dọn dữ liệu sinh lại được
+
+```bash
+make clean-data                    # xóa raw/splits/features, cache context và dữ liệu backup cũ
+make generate-dataset              # sinh lại raw seed 20261002 bằng generator repo cùng cấp
+# Trong environment training đã cấu hình, dựng lại split/features và train một run mới:
+python scripts/run_pipeline.py --stage all --output outputs/contextual-v4/seed-20261002/training/gatv2-rebuilt
+```
+
+Preview trước khi dọn: `python scripts/clean_generated_data.py`. Cleaner chỉ dọn payload trong `outputs/`, giữ checkpoint, báo cáo, hình và saved evaluation predictions. Log đường dẫn đã dọn nằm trong `outputs/cleanup.json`. Sau cleanup, training/feature replay cần dựng lại input; hình báo cáo train/validation/test vẫn xuất lại được từ predictions đã giữ. Generator cần environment/dependencies của repo `../anomaly-data-pipeline`; `make generate-dataset` chỉ tạo raw, không tự train lại.
+
+
+### Feature EDA trước khi rút gọn input GATv2
+
+```bash
+make feature-eda PYTHON=python
+# Nếu còn tensor, có thể chạy trực tiếp:
+python scripts/audit_features.py --config configs/dataset.json
+```
+
+`feature_eda` trong config đặt sample/correlation threshold, số node context, số validation context và permutation repeats. Khi tensor đã dọn, target Make dùng `--temporary-rebuild`: cần environment có `requirements-training.txt` cùng dependencies generator (mimesis, pydantic, PyYAML); raw/split/features được dựng trong thư mục tạm và tự dọn khi hoàn tất. Khi đã có feature artifact, runner sử dụng artifact đó. Thêm `--overwrite` nếu chủ đích tái tạo báo cáo audit đã tồn tại.
+
+Output `outputs/contextual-v4/seed-20261002/eda/feature-audit-v1/`: `report.md/json`, CSV thống kê/correlation/history coverage, heatmap tương quan transaction/node, biểu đồ permutation importance và PDF `feature_audit.pdf`. Correlation và biến thiên đo trên train; grouped permutation chỉ dùng validation và checkpoint GATv2 cố định. Test chỉ xuất chỉ số lịch sử để đối chiếu, không dùng chọn feature. Permutation không phải retrained ablation; graph/node embeddings giữ nguyên và không đo importance của encoder. Correlation cao, low variance hoặc importance thấp không tự động loại feature.
+
+Run audit hiện tại tái tạo khớp 21/21 payload file của input checkpoint, 10 invariant checks và 15 causal regression tests pass. Có hai cột transaction hằng (`type_unknown`, `channel_unknown`) và node unknown hằng trong sample known nodes. Đây là fallback schema, chưa nên xóa tùy tiện. Cặp transfer incoming count/amount có Spearman 0.9989 nhưng chỉ 0.5488 khi bỏ joint modal values (99.08% sample cùng giá trị phổ biến). Train cold-start 7.95%, validation/test 0%; median reference reliable 88.43% so với khoảng 96.2% ở holdout. Những khác biệt này cần tính đến khi đọc gap train/validation/test. Ablation retrain chưa chạy.
+
+
+### Feature reviewer và window động
+
+Đã thêm schema thử nghiệm `configs/features-v3.json`: mean completed theo account+type với window tùy chọn, request count 5m và optional auth/device/platform + new_device/missing flags. Giữ median cũ và legacy config riêng. `make configure-window WINDOW=1d` (hoặc `1w`, `1mo`) tạo profile tách output; có thể override mean/median/graph/node window độc lập. `1mo=30 ngày`. Xem [docs/FEATURE_WINDOWS.md](docs/FEATURE_WINDOWS.md) về mapping, nguồn dữ liệu còn thiếu và protocol đánh giá. Cần train GATv2 mới; checkpoint 35 chiều không đánh giá được schema 58 chiều.
+
+
+### Device trong dữ liệu sinh
+
+Generator repo cùng cấp đã bổ sung `transactions.device.device_id/platform` và request event `device_id/platform`, có RNG riêng và tỷ lệ đổi thiết bị cấu hình trong TOML. Validator đối chiếu snapshot/request. Dùng `configs/device-v1.json` với output riêng `outputs/contextual-v5-device/`; xem mục Device trong [docs/FEATURE_WINDOWS.md](docs/FEATURE_WINDOWS.md). Đã sinh 500k và train/evaluate đối chứng GATv2; chưa triển khai enrichment trong Go Backend.
+
+
+### Train đối chứng tác động device trên GATv2
+
+```bash
+make generate-dataset DATASET_RAW=outputs/contextual-v5-device/seed-20261002/raw
+python scripts/train_device_experiment.py --config configs/device-v1.json
+```
+
+Runner kiểm tra legacy 35-feature projection, labels/time/graph/node inputs khớp lần đầu bằng SHA256; train hai GATv2 cùng 58 chiều/số tham số/seed/budget: bật device và che 9 cột device trong suốt train/inference. Mean/5m/auth thiếu dữ liệu giống nhau giữa hai nhánh. Giữ checkpoint theo validation loss; freeze threshold cả hai nhánh bằng validation trước khi mở test. So original-35 chỉ mô tả thay đổi tổng thể; tác động device được đối chiếu giữa hai nhánh cùng 58 chiều. Artifact ở `outputs/contextual-v5-device/seed-20261002/experiments/device-v1/`; không ghi đè experiment cũ. Chỉ một seed, chưa là bằng chứng generalization hoặc significance.
+
+### Áp dụng review v2 và chạy inference GATv2
+
+[docs/REVIEW_V2_IMPLEMENTATION.md](docs/REVIEW_V2_IMPLEMENTATION.md) đối chiếu từng góp ý, hướng dẫn export bundle từ checkpoint/threshold validation đã freeze và replay một request hoặc chạy Kafka worker. Input/response giữ contract trong `specs/review.md`; feature/scaler và causal graph dùng chung với offline. History hỗ trợ JSONL, native EventStoreDB banking và Mongo event projection. Chưa kiểm chứng hạ tầng thật hoặc tích hợp consumer kết quả trong Go/FE.
+
+`configs/review-v2.json` là profile thử nghiệm graph/node history 7 ngày, mean 7 ngày, median 30 ngày, output riêng; cần export/train mới. Window 30 ngày có thể tạo bằng `configure_feature_window.py --base configs/device-v1.json --graph-window 1mo --node-window 1mo --output outputs/configs/review-graph-30d.json`. Không đổi cửa sổ của checkpoint đã train khi inference.
+
+Đã train profile review-v2 (500k, seed 42, 3 epoch): chọn epoch 2 theo validation loss, threshold validation 0.94979429. Test F1 0.94619 (precision 0.94176, recall 0.95067), so full-device 24h 0.93218; gần ngang original 35 chiều 0.94661. Báo cáo `outputs/contextual-v5-device/seed-20261002/experiments/review-v2/report.md` và biểu đồ đầy đủ train/validation/test trong evaluation output của config. Một seed, cùng holdout lịch sử; chưa chứng minh generalization hoặc significance.
+
+### Bộ tiêu chí v2 và pipeline EDA
+
+[Đặc tả tiêu chí](specs/Bo_tieu_chi_phat_hien_giao_dich_bat_thuong.md) giữ nguyên 49 mã, tách dấu hiệu hành vi, dữ kiện xác minh và ngữ cảnh cần rà soát; quy định unit, thời điểm, settled/projected, baseline và ba trạng thái matched/not_matched/insufficient_data. Không dùng matched làm anomaly label mặc định hoặc cộng điểm luật vào sigmoid. Catalog [anomaly_criteria.v2.json](specs/anomaly_criteria.v2.json) là nguồn cho bảng tiêu chí; sửa catalog rồi chạy `python scripts/render_criteria_spec.py`, kiểm tra bằng `make criteria-spec-check`.
+
+```bash
+make dataset-eda EDA_CONFIG=configs/criteria-eda-v2.json PYTHON=python
+```
+
+Chạy trong environment có dependencies training. Pipeline gồm dataset plots Matplotlib, feature EDA/correlation/validation permutation trên đúng checkpoint GATv2 58 chiều/7d, và criteria source-readiness. Config EDA riêng giữ nguyên SHA config đã dùng train. Output `outputs/contextual-v5-device/seed-20261002/eda/criteria-v2/` chứa README, ba nhóm báo cáo JSON/Markdown/CSV và PDF/PNG. Nếu thư mục đã tồn tại, đổi `eda_pipeline.output` sang phiên bản mới; không ghi đè kết quả cũ mặc định. Không sinh lại dataset, nhãn hoặc train model trong lệnh này.
+
+Kết quả 2026-10-19: 10 leakage screening checks và 15 causal tests pass; payload khớp checkpoint. Có 13 cột transaction hằng (gồm auth thiếu, cờ metadata luôn có và fallback categories); không tự động loại. Permutation validation: velocity/transfer-neighborhood/habits nhạy nhất; device AP drop khoảng 0.00095, auth bằng 0 vì không có nguồn. Đây là sensitivity của head với graph/node embeddings cố định, không phải retrained ablation hoặc đo toàn bộ GAT encoder.
+
+Source readiness: 25/49 có đủ nhóm nguồn được liệt kê xuất hiện, 15 thiếu một phần, 9 thiếu nguồn; chưa xác nhận criterion matching, completeness/watermark hoặc support từng account. Có 23.731 device nhưng 0 shared-device; device/platform coverage 100%, auth coverage 0%. Train không có đủ 90/91 ngày lịch tham chiếu cho A01/A03; A04 với cấu hình đề xuất 210 ngày vượt toàn bộ 181 ngày dataset. Cần thêm prehistory/kịch bản/ngữ cảnh trước khi kỳ vọng model bao phủ các tiêu chí này.

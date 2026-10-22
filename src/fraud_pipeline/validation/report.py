@@ -9,6 +9,8 @@ FEATURE_POLICY = {
     'transaction_types': ['TRANSFER', 'CASH_IN', 'CASH_OUT', 'PAYMENT', 'DEBIT'],
     'prediction_events': ['TransferCreated', 'TransactionRequested'],
     'allowed_request_fields': ['amount', 'fee', 'currency', 'channel', 'transactionType'],
+    'optional_request_context_fields': ['authentication_method', 'authentication_verified', 'device_id', 'platform'],
+    'optional_context_policy': 'Request-time enriched fields only; absent fields remain unknown/missing. No device ID numeric encoding; posted_at of current transaction excluded.',
     'derived_features': ['hour', 'day_of_week', 'calendar_tags_from_known_calendar',
                          'prior_request_count', 'prior_completed_amount_stats', 'time_since_prior_request', 'new_receiver'],
     'join_only': ['event_id', 'transaction_id', 'sourceAccountId', 'destinationAccountId'],

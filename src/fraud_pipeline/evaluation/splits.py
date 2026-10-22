@@ -29,7 +29,7 @@ def evaluate_splits(config, root):
     torch.set_num_threads(config['training']['threads'])
     model,metadata=load(checkpoint,expected_feature_sha256=feature_digest)
     batches=TemporalBatches(dataset,config['training']['snapshot_seconds'],config['training']['batch_size'],
-                            Path(identity['checkpoint']).parent/'contexts')
+                            Path(config['training'].get('context_cache',Path(identity['checkpoint']).parent/'contexts')))
     output.mkdir(parents=True)
     report={'model':'gatv2','checkpoint_sha256':identity['sha256'],'epoch':metadata['metadata']['epoch'],
             'threshold':identity['threshold'],'threshold_source':'Validation only, frozen before test',
