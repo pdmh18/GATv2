@@ -1,0 +1,121 @@
+{
+  "dataset": {
+    "run_root": "outputs/contextual-v5-device",
+    "seed": 20261002,
+    "source": "outputs/contextual-v5-device/seed-20261002/raw",
+    "validation_report": "outputs/contextual-v5-device/seed-20261002/validation/review-v2/validation.json",
+    "output": "outputs/contextual-v5-device/seed-20261002/splits/review-v2",
+    "features_output": "outputs/contextual-v5-device/seed-20261002/features-v3/mean-604800s_median-2592000s_graph-604800s_node-604800s"
+  },
+  "features": {
+    "request_windows_seconds": [
+      120,
+      300,
+      3600,
+      86400
+    ],
+    "amount_window_seconds": 2592000,
+    "amount_min_history": 5,
+    "include_fee": false,
+    "graph_window_seconds": 604800,
+    "neighborhood_window_seconds": 600,
+    "node_history_window_seconds": 604800,
+    "node_scaler_samples": 256,
+    "cold_start_min_requests": 20,
+    "graph_history": "settled",
+    "bidirectional_graph": true,
+    "chunk_size": 10000,
+    "mean_window_seconds": 604800,
+    "include_request_context": true,
+    "authentication_methods": [
+      "otp",
+      "password",
+      "biometric",
+      "pin",
+      "unknown"
+    ],
+    "platforms": [
+      "android",
+      "ios",
+      "web",
+      "desktop",
+      "unknown"
+    ]
+  },
+  "training": {
+    "output": "outputs/contextual-v5-device/seed-20261002/training/gatv2-skip-v3/mean-604800s_median-2592000s_graph-604800s_node-604800s",
+    "model_kind": "gatv2_skip",
+    "seed": 42,
+    "device": "cpu",
+    "threads": 1,
+    "epochs": 3,
+    "batch_size": 128,
+    "snapshot_seconds": 3600,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "gradient_clip": 1.0,
+    "patience": 2,
+    "min_delta": 0.0001,
+    "pos_weight": "train_ratio",
+    "threshold": 0.5,
+    "log_every_batches": 200,
+    "model": {
+      "hidden_dim": 32,
+      "heads": 4,
+      "num_layers": 2,
+      "dropout": 0.2
+    }
+  },
+  "feature_audit": {
+    "amount_windows_days": [
+      1,
+      7,
+      30
+    ],
+    "history_count_thresholds": [
+      1,
+      5,
+      10,
+      20
+    ],
+    "graph_windows_seconds": [
+      600,
+      3600,
+      86400,
+      604800
+    ]
+  },
+  "split": {
+    "train": 0.5,
+    "val": 0.3,
+    "test": 0.2,
+    "time_based": true
+  },
+  "evaluation": {
+    "output": "outputs/contextual-v5-device/seed-20261002/evaluation/gatv2-skip-v3/mean-604800s_median-2592000s_graph-604800s_node-604800s",
+    "train_variants": [],
+    "amount_feature": "log_amount_to_type_median",
+    "rule_features": [
+      "log_amount_to_type_median",
+      "log_src_request_count_120s",
+      "log_dst_transfer_attempt_distinct_sources",
+      "log_src_transfer_attempt_distinct_sources"
+    ],
+    "include_rule_baselines": false
+  },
+  "feature_eda": {
+    "output": "outputs/contextual-v5-device/seed-20261002/eda/features-v3/mean-604800s_median-2592000s_graph-604800s_node-604800s",
+    "seed": 42,
+    "correlation_samples": 50000,
+    "correlation_threshold": 0.95,
+    "node_contexts": 64,
+    "importance_contexts": 64,
+    "importance_repeats": 3,
+    "reference_training_output": "outputs/contextual-v4/seed-20261002/training/gatv2-v1",
+    "reference_evaluation_output": "outputs/contextual-v4/seed-20261002/evaluation/phase5-v1"
+  },
+  "window_profile": {
+    "id": "mean-604800s_median-2592000s_graph-604800s_node-604800s",
+    "duration_policy": "Fixed duration; 1mo=30 days. Request-count windows remain independent."
+  }
+}

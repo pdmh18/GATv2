@@ -52,6 +52,7 @@ class GATv2(nn.Module):
         *,
         in_channels: Optional[int] = None,
         masked_feature_indices: Optional[list[int]] = None,
+        use_skip_connection: bool = False,
     ) -> None:
         super().__init__()
 
@@ -63,6 +64,10 @@ class GATv2(nn.Module):
 
         if num_layers < 1:
             raise ValueError("`num_layers` phải >= 1.")
+        if use_skip_connection and num_layers < 2:
+            raise ValueError(
+                "`use_skip_connection=True` yêu cầu `num_layers >= 2`."
+            )
         if heads < 1:
             raise ValueError("`heads` phải >= 1.")
         if hidden_dim % heads != 0:
@@ -89,6 +94,7 @@ class GATv2(nn.Module):
         self.heads = heads
         self.num_layers = num_layers
         self.dropout = dropout
+        self.use_skip_connection = use_skip_connection
 
         # Mỗi layer xuất tổng cộng hidden_dim sau khi concat các attention heads.
         per_head_dim = hidden_dim // heads
@@ -155,14 +161,24 @@ class GATv2(nn.Module):
         del edge_attr  # intentionally unused in the current architecture
 
         h = x
-
         for layer_idx, conv in enumerate(self.convs):
+            previous_h = h
             h = conv(h, edge_index)
-
             # Activation + dropout sau mỗi GATv2 layer.
             # Với 2 layers, node có thể tổng hợp thông tin tới 2-hop.
             h = F.elu(h)
             h = F.dropout(h, p=self.dropout, training=self.training)
+
+            # Variant GATv2 + Skip/Residual Connection.
+            #
+            # Theo thiết kế Lin+Skip trong paper:
+            # output của GNN layer trước được cộng với output layer sau.
+            #
+            # Không áp dụng cho layer đầu tiên vì:
+            # raw node features có kích thước in_dim,
+            # còn output GATv2 có kích thước hidden_dim.
+            if self.use_skip_connection and layer_idx > 0:
+                h = h + previous_h
 
         return h
 
