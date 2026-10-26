@@ -25,25 +25,10 @@ class SelfLoopGAT(GATv2):
 
 def build_model(config):
     options = dict(config)
-    kind = options.pop("kind", "gatv2")
-
-    if kind == "gatv2":
-        return GATv2(**options)
-
-    if kind == "gatv2_skip":
-        options["use_skip_connection"] = True
-        return GATv2(**options)
-
-    if kind == "gatv2_self_loops":
-        return SelfLoopGAT(**options)
-
-    if kind in ("feature_mlp", "endpoint_mlp"):
-        return FeatureMLP(
-            **{
-                k: options[k]
-                for k in ("in_dim", "edge_dim", "hidden_dim", "dropout")
-            },
-            endpoints=kind == "endpoint_mlp",
-        )
-
-    raise ValueError(f"Unknown model kind: {kind}")
+    kind = options.pop('kind', 'gatv2')
+    if kind in ('gatv2', 'gatv2_self_loops'):
+        return (GATv2 if kind == 'gatv2' else SelfLoopGAT)(**options)
+    if kind in ('feature_mlp', 'endpoint_mlp'):
+        return FeatureMLP(**{k: options[k] for k in ('in_dim','edge_dim','hidden_dim','dropout')},
+                          endpoints=kind == 'endpoint_mlp')
+    raise ValueError(f'Unknown model kind: {kind}')
