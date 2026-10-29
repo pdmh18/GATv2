@@ -185,6 +185,70 @@ class InferenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'metadata disagree'):
             normalize_event(bad)
 
+    def objectid_request(self, request):
+        from uuid import NAMESPACE_OID, uuid5
+        result = copy.deepcopy(request)
+        transaction_id = str(uuid5(NAMESPACE_OID, 'runtime-account-test:' + result['aggregate_id']))
+        result['aggregate_id'] = transaction_id
+        result['event_id'] = str(uuid5(NAMESPACE_OID, transaction_id + ':' + result['event_type']))
+        result['payload']['sourceAccountId'] = '6623a1f89c30111111111111'
+        result['payload']['destinationAccountId'] = '6623a1f89c30222222222222'
+        return result
+
+    def test_unseen_objectids_have_distinct_cold_start_nodes_and_real_inference(self):
+        request = self.objectid_request(self.requests[0])
+        frozen = copy.deepcopy(self.predictor.nodes)
+        context = self.predictor.inputs(request, [])
+        source, destination = context['target_edge_index'][:, 0]
+        self.assertNotEqual(source, 0)
+        self.assertNotEqual(destination, 0)
+        self.assertNotEqual(source, destination)
+        self.assertEqual(context['x'].shape[0], len(frozen) + 2)
+        self.assertEqual(context['x'].shape[1], len(self.predictor.manifest['node_feature_names']))
+        response = self.predictor.predict(request, [])
+        self.assertEqual(response['transaction_id'], request['aggregate_id'])
+        self.assertTrue(0 <= response['risk_score'] <= 1)
+        self.assertEqual(self.predictor.nodes, frozen)
+        self.assertEqual(response, ReplayPredictor(self.root/'bundle').predict(request, []))
+
+    def test_account_rename_preserves_graph_features_and_score(self):
+        rename = {'A': '6623a1f89c30111111111111', 'B': '6623a1f89c30222222222222'}
+        history = copy.deepcopy(self.events)
+        for event in history:
+            for field in ('sourceAccountId', 'destinationAccountId'):
+                identity = event['payload'].get(field)
+                if identity in rename:
+                    event['payload'][field] = rename[identity]
+        for request in self.requests:
+            if request['event_type'] != 'TransferCreated':
+                continue
+            mapped = copy.deepcopy(request)
+            for field in ('sourceAccountId', 'destinationAccountId'):
+                mapped['payload'][field] = rename[mapped['payload'][field]]
+            before = self.predictor.inputs(request, self.events)
+            after = self.predictor.inputs(mapped, history)
+            np.testing.assert_allclose(before['edge_features'], after['edge_features'])
+            for old, new in zip(before['target_edge_index'][:, 0], after['target_edge_index'][:, 0]):
+                np.testing.assert_allclose(before['x'][old], after['x'][new])
+            self.assertNotEqual(*after['target_edge_index'][:, 0])
+            self.assertAlmostEqual(self.predictor.predict(request, self.events)['risk_score'],
+                                   self.predictor.predict(mapped, history)['risk_score'], places=7)
+
+    def test_new_accounts_in_existing_snapshot_keep_identity_without_future_history(self):
+        predictor = copy.copy(self.predictor)
+        predictor.bundle = dict(predictor.bundle, snapshot_seconds=100000000000)
+        request = self.objectid_request(self.requests[-1])
+        context = predictor.inputs(request, self.events)
+        self.assertTrue(np.all(context['target_edge_index'] > 0))
+        self.assertNotEqual(*context['target_edge_index'][:, 0])
+        future = self.objectid_request(self.requests[-1])
+        future['payload']['sourceAccountId'] = '6623a1f89c30333333333333'
+        future['occurred_at'] = '2099-01-01T00:00:00Z'
+        with_future = predictor.inputs(request, [*self.events, future])
+        self.assert_context_equal(context, with_future)
+        self.assertEqual(self.predictor.predict(request, self.events),
+                         self.predictor.predict(request, [*self.events, future]))
+
     def test_pipeline_inference_uses_configured_bundle_and_history(self):
         from fraud_pipeline.pipeline import stage_infer
         with patch('fraud_pipeline.inference.stream_inference.run') as worker:

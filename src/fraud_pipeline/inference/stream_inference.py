@@ -3,6 +3,7 @@ import json
 
 from ..features.causal import REQUESTS, microseconds
 from .contracts import normalize_event
+from .response import response_key
 
 
 def load_inference_config(path):
@@ -27,7 +28,7 @@ def consume(consumer, producer, predictor, history, *, output_topic, delivery_ti
         result = handle_message(predictor, history, message.value)
         if result is not None:
             # At-least-once output: BE must upsert by transaction/model/feature version.
-            key = ':'.join(result[k] for k in ('transaction_id', 'model_version', 'feature_version'))
+            key = response_key(result)
             producer.send(output_topic, key=key.encode(), value=result).get(timeout=delivery_timeout)
         consumer.commit()
 

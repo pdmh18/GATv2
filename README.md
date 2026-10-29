@@ -651,7 +651,7 @@ Runner kiểm tra legacy 35-feature projection, labels/time/graph/node inputs kh
 
 ### Áp dụng review v2 và chạy inference GATv2
 
-[docs/REVIEW_V2_IMPLEMENTATION.md](docs/REVIEW_V2_IMPLEMENTATION.md) đối chiếu từng góp ý, hướng dẫn export bundle từ checkpoint/threshold validation đã freeze và replay một request hoặc chạy Kafka worker. Input/response giữ contract trong `specs/review.md`; feature/scaler và causal graph dùng chung với offline. History hỗ trợ JSONL, native EventStoreDB banking và Mongo event projection. Chưa kiểm chứng hạ tầng thật hoặc tích hợp consumer kết quả trong Go/FE.
+[docs/REVIEW_V2_IMPLEMENTATION.md](docs/REVIEW_V2_IMPLEMENTATION.md) đối chiếu từng góp ý, hướng dẫn export bundle từ checkpoint/threshold validation đã freeze và replay một request hoặc chạy Kafka worker. Input/response giữ contract trong `specs/review.md`; output chuẩn hóa và cách BE/FE hiển thị nằm trong [docs/MODEL_RESPONSE_CONTRACT.md](docs/MODEL_RESPONSE_CONTRACT.md) + [specs/model_response.v1.json](specs/model_response.v1.json). Feature/scaler và causal graph dùng chung với offline. History hỗ trợ JSONL, native EventStoreDB banking và Mongo event projection. Chưa kiểm chứng hạ tầng thật hoặc tích hợp consumer kết quả trong Go/FE.
 
 `configs/review-v2.json` là profile thử nghiệm graph/node history 7 ngày, mean 7 ngày, median 30 ngày, output riêng; cần export/train mới. Window 30 ngày có thể tạo bằng `configure_feature_window.py --base configs/device-v1.json --graph-window 1mo --node-window 1mo --output outputs/configs/review-graph-30d.json`. Không đổi cửa sổ của checkpoint đã train khi inference.
 
@@ -670,3 +670,11 @@ Chạy trong environment có dependencies training. Pipeline gồm dataset plots
 Kết quả 2026-10-19: 10 leakage screening checks và 15 causal tests pass; payload khớp checkpoint. Có 13 cột transaction hằng (gồm auth thiếu, cờ metadata luôn có và fallback categories); không tự động loại. Permutation validation: velocity/transfer-neighborhood/habits nhạy nhất; device AP drop khoảng 0.00095, auth bằng 0 vì không có nguồn. Đây là sensitivity của head với graph/node embeddings cố định, không phải retrained ablation hoặc đo toàn bộ GAT encoder.
 
 Source readiness: 25/49 có đủ nhóm nguồn được liệt kê xuất hiện, 15 thiếu một phần, 9 thiếu nguồn; chưa xác nhận criterion matching, completeness/watermark hoặc support từng account. Có 23.731 device nhưng 0 shared-device; device/platform coverage 100%, auth coverage 0%. Train không có đủ 90/91 ngày lịch tham chiếu cho A01/A03; A04 với cấu hình đề xuất 210 ngày vượt toàn bộ 181 ngày dataset. Cần thêm prehistory/kịch bản/ngữ cảnh trước khi kỳ vọng model bao phủ các tiêu chí này.
+
+### Account ID của server khi inference
+
+Request có `sourceAccountId`/`destinationAccountId`; predictor hỗ trợ account mới
+bằng node riêng theo policy `distinct-account-nodes-v1`. Không cần đổi ObjectID
+thành UUID training, không gộp account mới vào một unknown node. Giữ nguyên bundle
+và policy feature/history; xem [account identity](docs/INFERENCE_ACCOUNT_IDENTITY.md)
+về cold-start, giới hạn và kiểm tra trước khi áp dụng cho dữ liệu thật.

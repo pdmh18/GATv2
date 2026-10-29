@@ -11,9 +11,13 @@ from ..features.export import NODE_TYPES
 from ..ingestion.request_loader import file_hash
 from ..registry.save_load import load
 from .contracts import normalize_event, unwrap_record
+from .response import build_response
+from .account_catalog import ACCOUNT_IDENTITY_POLICY, request_account_catalog
 
 
 class ReplayPredictor:
+    account_identity_policy = ACCOUNT_IDENTITY_POLICY
+
     def __init__(self, bundle, *, device='cpu'):
         self.directory = Path(bundle)
         self.bundle = json.loads((self.directory/'bundle.json').read_text())
@@ -93,6 +97,7 @@ class ReplayPredictor:
         bucket = at // width
         cutoff = next((microseconds(e['occurred_at']) for e in events
                        if e['event_type'] in REQUESTS and microseconds(e['occurred_at']) // width == bucket), at)
+        nodes, mapping = request_account_catalog(self.nodes, request, events, cutoff)
         state = State(self.options, self.zone)
         for _ in replay(events, state):
             pass
@@ -102,8 +107,8 @@ class ReplayPredictor:
         features[:, columns] = (features[:, columns] - np.asarray(prep['mean'])) / np.asarray(prep['scale'])
 
         def node_id(identity, timestamp):
-            i = self.mapping.get(identity, 0)
-            return i if self.nodes[i]['created_at_us'] <= timestamp else 0
+            i = mapping.get(identity, 0)
+            return i if nodes[i]['created_at_us'] <= timestamp else 0
 
         graph = []
         for event in events:
@@ -115,11 +120,11 @@ class ReplayPredictor:
             if p.get('transactionType') == 'CASH_IN':
                 src, dst = dst, src
             graph.append((timestamp, src, dst, int(event['event_type'] in COMPLETED), np.log1p(p['amount'])))
-        static = np.zeros((len(self.nodes), len(NODE_TYPES)), dtype='float32')
-        for i, node in enumerate(self.nodes):
+        static = np.zeros((len(nodes), len(NODE_TYPES)), dtype='float32')
+        for i, node in enumerate(nodes):
             static[i, NODE_TYPES.index(node['type'])] = 1
         arrays = {'node_features': static,
-                  'node_created_at_us': np.asarray([n['created_at_us'] for n in self.nodes]),
+                  'node_created_at_us': np.asarray([n['created_at_us'] for n in nodes]),
                   'graph_timestamps_us': np.asarray([g[0] for g in graph], dtype='int64'),
                   'graph_edge_index': np.asarray([[g[1] for g in graph], [g[2] for g in graph]], dtype='int64'),
                   'graph_kind': np.asarray([g[3] for g in graph], dtype='uint8'),
@@ -143,7 +148,7 @@ class ReplayPredictor:
             score = float(torch.sigmoid(self.model(**tensors)).item())
         if not np.isfinite(score):
             raise ValueError('Nonfinite risk score')
-        return {'transaction_id': request.get('transaction_id', event['aggregate_id']), 'risk_score': score,
-                'predicted_label': int(score >= self.bundle['threshold']),
-                'threshold': self.bundle['threshold'], 'model_version': self.bundle['model_version'],
-                'feature_version': self.bundle['feature_version']}
+        return build_response(transaction_id=request.get('transaction_id', event['aggregate_id']),
+                              risk_score=score, threshold=self.bundle['threshold'],
+                              model_version=self.bundle['model_version'],
+                              feature_version=self.bundle['feature_version'])

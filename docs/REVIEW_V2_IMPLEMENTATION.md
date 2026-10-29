@@ -54,7 +54,7 @@ Bundle hoạt động độc lập với raw/split/tensor đã export, nhưng **
 }
 ```
 
-Response: `transaction_id`, `risk_score`, `predicted_label` (0/1), `threshold`, `model_version`, `feature_version`. Risk score là sigmoid logit từ weighted BCE, chưa được hiệu chỉnh thành xác suất gian lận thực tế.
+Response: `transaction_id`, `risk_score`, `predicted_label` (0/1), `threshold`, `model_version`, `feature_version`. Risk score là sigmoid logit từ weighted BCE, chưa được hiệu chỉnh thành xác suất gian lận thực tế. Hợp đồng máy đọc được ở [`specs/model_response.v1.json`](../specs/model_response.v1.json); quy tắc BE nhận/lưu và FE hiển thị ở [`docs/MODEL_RESPONSE_CONTRACT.md`](MODEL_RESPONSE_CONTRACT.md).
 
 ## Nguồn lịch sử và causal cutoff
 

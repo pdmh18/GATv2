@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "model-response.v1",
+  "title": "GATv2 model response v1",
+  "description": "Output duy nhất mà ML service trả cho backend. Đây là kết quả chấm điểm, không phải quyết định nghiệp vụ cuối cùng. Risk score là sigmoid của weighted-BCE logit, chưa hiệu chỉnh thành xác suất gian lận.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "transaction_id",
+    "risk_score",
+    "predicted_label",
+    "threshold",
+    "model_version",
+    "feature_version"
+  ],
+  "properties": {
+    "transaction_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ID giao dịch bên ngoài, giữ nguyên từ request raw. Với request canonical/native, đây là aggregate_id của transaction. Dùng để join với giao diện, không phải khóa duy nhất của một lần chấm điểm."
+    },
+    "risk_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Điểm rủi ro từ sigmoid. Không phải xác suất gian lận đã hiệu chỉnh; không hiển thị như 'xác suất'."
+    },
+    "predicted_label": {
+      "type": "integer",
+      "enum": [0, 1],
+      "description": "Nhãn sau ngưỡng: 1 nếu risk_score >= threshold, ngược lại 0. Không phải quyết định allow/review/block."
+    },
+    "threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Ngưỡng đã freeze trên validation cùng model_version. Phải hiển thị/audit cùng risk_score và predicted_label."
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Định danh artifact model đã dùng. Thuộc khóa idempotency cùng transaction_id và feature_version."
+    },
+    "feature_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Định danh schema/policy feature đã dùng. Thuộc khóa idempotency cùng transaction_id và model_version."
+    }
+  },
+  "examples": [
+    {
+      "transaction_id": "TX001",
+      "risk_score": 0.9821,
+      "predicted_label": 1,
+      "threshold": 0.9517361521720886,
+      "model_version": "gatv2-device-control-v1",
+      "feature_version": "schema-3-0b9efd44d793"
+    },
+    {
+      "transaction_id": "TX002",
+      "risk_score": 0.1245,
+      "predicted_label": 0,
+      "threshold": 0.9517361521720886,
+      "model_version": "gatv2-device-control-v1",
+      "feature_version": "schema-3-0b9efd44d793"
+    }
+  ]
+}
