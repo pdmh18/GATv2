@@ -59,6 +59,7 @@ class InferenceTests(unittest.TestCase):
         export_splits(raw, report, cls.root/'splits', config['split'])
         export_features(raw, report, cls.root/'splits', cls.root/'features', config['features'])
         cls.data = TemporalDataset(cls.root/'features')
+        cls.addClassCleanup(cls._close_dataset_files)
         cls.events = [json.loads(line) for line in (raw/'events.jsonl').read_text().splitlines()]
         cls.requests = [e for e in cls.events if e['event_type'] in REQUESTS]
         cls.training = cls.root/'training'
@@ -77,6 +78,13 @@ class InferenceTests(unittest.TestCase):
             'models': {'gatv2': {'sha256': file_hash(cls.training/'best.pt'), 'threshold': .7}}}))
         export_bundle(cls.training, cls.selection, cls.root/'bundle', model_version='gatv2-test')
         cls.predictor = ReplayPredictor(cls.root/'bundle')
+
+    @classmethod
+    def _close_dataset_files(cls):
+        # Release NumPy memory maps before deleting the test's temporary directory.
+        for array in cls.data.arrays.values():
+            if isinstance(array, np.memmap):
+                array._mmap.close()
 
     def assert_context_equal(self, actual, expected):
         for name in ('x', 'edge_index', 'target_edge_index', 'edge_features'):
@@ -140,6 +148,104 @@ class InferenceTests(unittest.TestCase):
         for changes in ({'posted_at': raw['created_at']}, {'risk_score': .9}, {'authentication_verified': 'true'}):
             with self.assertRaises(ValueError):
                 normalize_event(dict(raw, **changes))
+
+    def test_skip_bundle_load_inference_and_kind_integrity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root/'training'
+            training.mkdir()
+            for name in ('manifest.json', 'preprocessing.json', 'node_preprocessing.json', 'nodes.json'):
+                (training/('feature-'+name)).write_bytes((self.root/'features'/name).read_bytes())
+            options = dict(kind='gatv2_skip', in_dim=12,
+                           edge_dim=len(self.data.manifest['feature_names']),
+                           hidden_dim=8, heads=2, num_layers=2, dropout=0.)
+            torch.manual_seed(17)
+            original = build_model(options).eval()
+            self.assertTrue(original.use_skip_connection)
+            metadata = {'feature_manifest_sha256': file_hash(self.root/'features/manifest.json'),
+                        'snapshot_seconds': 3600}
+            save(original, training/'best.pt', model_config=options, metadata=metadata)
+            selection = root/'selection.json'
+            selection.write_text(json.dumps({'status': 'frozen_before_test',
+                'selected_model': 'gatv2_skip', 'feature_manifest_sha256': metadata['feature_manifest_sha256'],
+                'models': {'gatv2_skip': {'sha256': file_hash(training/'best.pt'), 'threshold': .7}}}))
+            target = root/'bundle'
+            exported = export_bundle(training, selection, target, model_version='skip-test')
+            self.assertEqual(exported['model_kind'], 'gatv2_skip')
+            predictor = ReplayPredictor(target)
+            self.assertTrue(predictor.model.use_skip_connection)
+            request = self.requests[3]
+            context = predictor.inputs(request, self.events)
+            tensors = {k: torch.from_numpy(context[k]).to(
+                dtype=torch.float32 if k in ('x', 'edge_features') else torch.long)
+                for k in ('x', 'edge_index', 'target_edge_index', 'edge_features')}
+            with torch.inference_mode():
+                expected_logits = original(**tensors)
+                loaded_logits = predictor.model(**tensors)
+            torch.testing.assert_close(loaded_logits, expected_logits, rtol=0, atol=0)
+            self.assertAlmostEqual(predictor.predict(request, self.events)['risk_score'],
+                                   float(torch.sigmoid(expected_logits).item()), places=7)
+
+            # Same parameters with Skip disabled must produce different account embeddings.
+            baseline = build_model(dict(options, kind='gatv2')).eval()
+            baseline.load_state_dict(original.state_dict(), strict=True)
+            with torch.inference_mode():
+                self.assertFalse(torch.allclose(baseline.encode(tensors['x'], tensors['edge_index']),
+                                                original.encode(tensors['x'], tensors['edge_index'])))
+
+            # Matching SHA is not sufficient when the selected variant is mislabeled.
+            wrong = root/'wrong.json'
+            changed = json.loads(selection.read_text())
+            changed['selected_model'] = 'gatv2'
+            changed['models']['gatv2'] = changed['models'].pop('gatv2_skip')
+            wrong.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(ValueError, 'architecture differs'):
+                export_bundle(training, wrong, root/'wrong-bundle', model_version='wrong')
+
+            # Tampered bundle metadata and selection must not silently select baseline.
+            bundle_meta = target/'bundle.json'
+            raw_meta = json.loads(bundle_meta.read_text())
+            bundle_meta.write_text(json.dumps(dict(raw_meta, model_kind='gatv2')))
+            with self.assertRaisesRegex(ValueError, 'model kinds disagree'):
+                ReplayPredictor(target)
+            bundle_meta.write_text(json.dumps(raw_meta))
+            selected_file = target/'selection.json'
+            selected = json.loads(selected_file.read_text())
+            selected['selected_model'] = 'unknown'
+            selected_file.write_text(json.dumps(selected))
+            raw_meta['files']['selection.json'] = file_hash(selected_file)
+            bundle_meta.write_text(json.dumps(raw_meta))
+            with self.assertRaisesRegex(ValueError, 'Unsupported inference model kind'):
+                ReplayPredictor(target)
+
+    def test_legacy_baseline_checkpoint_and_bundle_without_kind(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            training = root/'training'
+            training.mkdir()
+            for name in ('manifest.json', 'preprocessing.json', 'node_preprocessing.json', 'nodes.json'):
+                (training/('feature-'+name)).write_bytes((self.root/'features'/name).read_bytes())
+            # Simulate a legacy checkpoint without an explicit model kind.
+            cfg = dict(in_dim=12, edge_dim=len(self.data.manifest['feature_names']),
+                       hidden_dim=8, heads=2, num_layers=2, dropout=0.)
+            model = build_model(cfg).eval()
+            metadata = {'feature_manifest_sha256': file_hash(self.root/'features/manifest.json'),
+                        'snapshot_seconds': 3600}
+            save(model, training/'best.pt', model_config=cfg, metadata=metadata)
+            selection = root/'selection.json'
+            selection.write_text(json.dumps({'status': 'frozen_before_test', 'selected_model': 'gatv2',
+                'feature_manifest_sha256': metadata['feature_manifest_sha256'],
+                'models': {'gatv2': {'sha256': file_hash(training/'best.pt'), 'threshold': .7}}}))
+            target = root/'bundle'
+            export_bundle(training, selection, target, model_version='baseline-legacy')
+            bundle_meta = target/'bundle.json'
+            raw_meta = json.loads(bundle_meta.read_text())
+            del raw_meta['model_kind']
+            bundle_meta.write_text(json.dumps(raw_meta))
+            loaded = ReplayPredictor(target)
+            self.assertFalse(loaded.model.use_skip_connection)
+            value = loaded.predict(self.requests[3], self.events)['risk_score']
+            self.assertTrue(0 <= value <= 1)
 
     def test_bundle_rejects_wrong_checkpoint_and_modified_policy(self):
         selection = json.loads(self.selection.read_text())

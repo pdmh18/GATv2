@@ -110,11 +110,18 @@ class ReviewerFeatureTests(unittest.TestCase):
             manifest=export_features(source,report,root/'splits',root/'features',OPTIONS)
             self.assertEqual(manifest['schema_version'],3)
             data=TemporalDataset(root/'features')
-            column=manifest['feature_names'].index('new_device')
-            self.assertEqual(data.arrays['transaction_features'][1,column],1)
-            self.assertEqual(data.arrays['transaction_features'][3,column],0)
-            request=json.loads((source/'events.jsonl').read_text().splitlines()[-2])
-            request['payload']['posted_at']=request['occurred_at'];audit=Audit()
-            self.assertFalse(validate_event(audit,request,'test'))
+            try:
+                column=manifest['feature_names'].index('new_device')
+                self.assertEqual(data.arrays['transaction_features'][1,column],1)
+                self.assertEqual(data.arrays['transaction_features'][3,column],0)
+                request=json.loads((source/'events.jsonl').read_text().splitlines()[-2])
+                request['payload']['posted_at']=request['occurred_at'];audit=Audit()
+                self.assertFalse(validate_event(audit,request,'test'))
+            finally:
+                # Windows requires memory-mapped arrays to be closed before temp directory removal.
+                for array in data.arrays.values():
+                    mapping = getattr(array, '_mmap', None)
+                    if mapping is not None:
+                        mapping.close()
 
 if __name__=='__main__':unittest.main()

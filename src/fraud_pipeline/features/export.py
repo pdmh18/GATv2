@@ -168,6 +168,8 @@ def export_features(source, validation_report, splits, output, options, *, overw
         for name, value in graph.items():
             value.flush()
             np.save(staged / (name + '.npy'), value[:, :graph_count] if value.ndim == 2 else value[:graph_count])
+            # Windows cannot delete an open NumPy memory-mapped file.
+            value._mmap.close()
             (staged / ('.' + name + '.npy')).unlink()
         node_features = np.zeros((len(nodes), len(NODE_TYPES)), dtype='float32')
         for i, node in enumerate(nodes):
@@ -176,6 +178,10 @@ def export_features(source, validation_report, splits, output, options, *, overw
         np.save(staged / 'node_created_at_us.npy', np.asarray([n['created_at_us'] for n in nodes], dtype='int64'))
         for code, name in enumerate(SPLITS):
             np.save(staged / (name + '_mask.npy'), codes == code)
+        # Release mapped outputs before moving the staging directory on Windows.
+        for value in (features, target_edges, flow_edges, targets, codes, times, prefixes):
+            value.flush()
+            value._mmap.close()
         (staged / 'nodes.json').write_text(json.dumps(nodes, indent=2) + '\n')
         preprocessing = {'numeric_indices': numeric, 'mean': mean.tolist(), 'scale': scale.tolist(),
                          'fit_split': 'train', 'fit_count': seen, 'type_vocabulary': TYPES, 'channel_vocabulary': ('mobile', 'web', 'desktop', 'unknown'),

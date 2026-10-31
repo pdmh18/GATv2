@@ -59,6 +59,16 @@ def predict(model, batches, split):
                         note='Amortized CPU microbatch cost; excludes feature extraction. Wall time includes cache/context IO; not online request latency.')
 
 
+def reference_model_kind(training_config, reference_config):
+    """Require evaluation to use the architecture that produced the reference run."""
+    kind = training_config.get('model_kind', 'gatv2')
+    if kind not in ('gatv2', 'gatv2_skip'):
+        raise ValueError(f'Unsupported reference model kind: {kind}')
+    if reference_config.get('model_kind', 'gatv2') != kind:
+        raise ValueError('Reference training model_kind differs from evaluation config')
+    return kind
+
+
 def run(config, root):
     import torch
     root = Path(root).resolve()
@@ -71,6 +81,7 @@ def run(config, root):
     _, source_hashes, _ = verify_validation(resolve(config['dataset']['source']), resolve(config['dataset']['validation_report']))
     reference = resolve(config['training']['output'])
     reference_config = json.loads((reference/'config.json').read_text())
+    reference_kind = reference_model_kind(config['training'], reference_config)
     for key in ('seed','device','threads','epochs','batch_size','snapshot_seconds','learning_rate','weight_decay','gradient_clip','patience','min_delta','pos_weight','model'):
         if config['training'][key] != reference_config[key]:
             raise ValueError(f'Reference training budget differs: {key}')
@@ -84,9 +95,11 @@ def run(config, root):
     output.mkdir(parents=True)
     cache = Path(config['training'].get('context_cache',reference/'contexts'))
     (output/'config.json').write_text(json.dumps(config, indent=2)+'\n')
-    variants = {'gatv2': reference}
+    variants = {reference_kind: reference}
     # Keep the Phase 4 checkpoint selection rule (minimum weighted validation loss).
     for kind in settings['train_variants']:
+        if kind in variants:
+            raise ValueError(f'Duplicate evaluation model variant: {kind}')
         run_path = output/kind
         options = dict(config['training'], model_kind=kind, context_cache=str(cache))
         print(f'Training comparison {kind}', flush=True)
@@ -95,6 +108,8 @@ def run(config, root):
     reports, predictions, identities = {}, {}, {}
     for kind, path in variants.items():
         model, checkpoint = load(path/'best.pt', expected_feature_sha256=digest)
+        if checkpoint['model_config'].get('kind', 'gatv2') != kind:
+            raise ValueError(f'Evaluation checkpoint kind mismatch: {kind}')
         with np.load(path/'validation_predictions.npz') as saved:
             pred = {k: saved[k].copy() for k in saved.files}
         if not np.array_equal(pred['indices'], np.flatnonzero(dataset.arrays['validation_mask'])) or not np.array_equal(pred['labels'], dataset.arrays['labels'][pred['indices']]):
@@ -124,6 +139,7 @@ def run(config, root):
     # Main deployment candidate is selected only among trained models by validation F1.
     selected = max(variants, key=lambda k: (reports[k]['validation']['f1'], reports[k]['validation']['average_precision']))
     selection = {'status':'frozen_before_test', 'feature_manifest_sha256':digest,
+                 'reference_model':reference_kind,
                  'selection_rule':'Highest validation F1 after validation-only threshold optimization; AP breaks ties',
                  'selected_model':selected, 'models':identities, 'validation':reports,
                  'threshold_rule':'Exact maximum validation F1; ties choose higher threshold',

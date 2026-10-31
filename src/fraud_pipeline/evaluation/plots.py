@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import numpy as np
 
-LABELS = {'gatv2':'GATv2','feature_mlp':'Transaction MLP','endpoint_mlp':'Endpoint MLP',
+LABELS = {'gatv2':'GATv2','gatv2_skip':'GATv2 Skip','feature_mlp':'Transaction MLP','endpoint_mlp':'Endpoint MLP',
           'gatv2_self_loops':'GAT self-loops','amount_only':'Amount / median','history_rule':'History rule'}
 
 
@@ -36,9 +36,9 @@ def export_plots(run_directory):
     selection=json.loads((run_directory/'selection.json').read_text())
     if file_hash(run_directory/'selection.json')!=report['selection_sha256']:
         raise ValueError('Frozen selection checksum mismatch')
-    selected='gatv2'; names=[selected];predictions={};curves={}
+    selected=selection.get('reference_model','gatv2'); names=[selected];predictions={};curves={}
     if selected not in report['comparisons']:
-        raise ValueError('Report requires GATv2 test predictions as the research model')
+        raise ValueError(f'Report requires {selected} test predictions as the research model')
     first=None
     for name in names:
         with np.load(run_directory/(name+'-test.npz'),allow_pickle=False) as saved:
@@ -77,7 +77,7 @@ def export_plots(run_directory):
         axes[1].plot([0,1],[0,1],'k--',lw=1,label='Random ranking')
         axes[1].set(xlabel='False positive rate',ylabel='True positive rate',title='ROC',xlim=(0,1),ylim=(0,1.02))
         for ax in axes:ax.legend(loc='lower left' if ax is axes[0] else 'lower right',fontsize=8)
-        fig.suptitle('GATv2 · test ROC and Precision–Recall')
+        fig.suptitle(f'{LABELS.get(selected,selected)} · test ROC and Precision–Recall')
         save(fig,'roc_pr_curves')
         m=report['comparisons'][selected]['test']
         counts=np.array([[m['tn'],m['fp']],[m['fn'],m['tp']]])
@@ -107,7 +107,7 @@ def export_plots(run_directory):
             cell.set_edgecolor('#d5dce3')
             if row==0:cell.set_facecolor('#e8edf2');cell.set_text_props(weight='bold')
             elif names[row-1]==selected:cell.set_facecolor('#e6f3f0');cell.set_text_props(weight='bold')
-        ax.set_title('GATv2 · test metrics',pad=15)
+        ax.set_title(f'{LABELS.get(selected,selected)} · test metrics',pad=15)
         fig.text(.5,.035,'Threshold selected on validation and frozen before test.',
                  ha='center',fontsize=9)
         save(fig,'gatv2_metrics')
@@ -123,13 +123,13 @@ def export_plots(run_directory):
                                    '\n'.join('- '+name for name in files if name.endswith('.png'))+
                                    '\n\nEach figure: PNG/PDF. Combined report: `evaluation_charts.pdf` (3 pages).\n'+
                                    'Confusion matrix: research model GATv2, counts and percentages by true class.\n')
-    gat_report={'model':'gatv2','threshold_source':'Frozen validation F1 threshold',
-                'checkpoint':selection['models']['gatv2'], 'test':report['comparisons']['gatv2']['test'],
-                'prediction_sha256':manifest['prediction_sha256']['gatv2'],
+    gat_report={'model':selected,'threshold_source':'Frozen validation F1 threshold',
+                'checkpoint':selection['models'][selected], 'test':report['comparisons'][selected]['test'],
+                'prediction_sha256':manifest['prediction_sha256'][selected],
                 'limitations':'One synthetic dataset seed and one training seed; scores are not calibrated probabilities.'}
     (run_directory/'gatv2_report.json').write_text(json.dumps(gat_report,indent=2)+'\n')
     metrics=gat_report['test']
-    (run_directory/'gatv2_report.md').write_text('# GATv2 test evaluation\n\n'+
+    (run_directory/'gatv2_report.md').write_text(f'# {LABELS.get(selected,selected)} test evaluation\n\n'+
         '| Precision | Recall | F1 | AP | ROC-AUC | Threshold |\n|---:|---:|---:|---:|---:|---:|\n'+
         '| '+' | '.join(f'{metrics[k]:.4f}' for k in ('precision','recall','f1','average_precision','roc_auc','threshold'))+' |\n\n'+
         f'TP={metrics["tp"]}, FP={metrics["fp"]}, FN={metrics["fn"]}, TN={metrics["tn"]}.\n\n'+

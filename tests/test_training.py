@@ -63,6 +63,30 @@ class BatchTests(unittest.TestCase):
 
 
 class TrainerTests(unittest.TestCase):
+    def test_skip_training_config_persists_architecture(self):
+        from fraud_pipeline.features.export import export_features
+        from fraud_pipeline.ingestion.request_loader import file_hash
+        from fraud_pipeline.models.trainer import train_run
+        from fraud_pipeline.registry.save_load import load
+        from fraud_pipeline.split_export import export_splits
+        from fraud_pipeline.validation import validate_dataset
+        from test_dataset_validation import fixture
+        config=json.loads((ROOT/'configs/dataset.json').read_text())
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);raw=root/'raw';raw.mkdir();fixture(raw)
+            report=root/'validation.json';report.write_text(json.dumps(validate_dataset(raw)))
+            export_splits(raw,report,root/'splits',config['split'])
+            export_features(raw,report,root/'splits',root/'features',config['features'])
+            training=dict(config['training'],model_kind='gatv2_skip',epochs=1,
+                          model={'hidden_dim':8,'heads':2,'num_layers':2,'dropout':0.})
+            summary=train_run(root/'features',root/'run',training)
+            self.assertEqual(summary['model_config']['kind'],'gatv2_skip')
+            model,checkpoint=load(root/'run/best.pt',
+                expected_feature_sha256=file_hash(root/'features/manifest.json'))
+            self.assertTrue(model.use_skip_connection)
+            self.assertEqual(checkpoint['model_config']['kind'],'gatv2_skip')
+            self.assertTrue(summary['checkpoint_reload_verified'])
+
     def test_real_training_checkpoint_reload_and_artifact_identity(self):
         import numpy as np
         from fraud_pipeline.features.export import export_features
