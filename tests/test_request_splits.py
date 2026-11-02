@@ -180,7 +180,7 @@ class RequestSplitTests(unittest.TestCase):
     def test_cli_runs_from_outside_repo(self):
         completed = subprocess.run([sys.executable, str(ROOT/'scripts/run_pipeline.py'), '--stage', 'split',
                                     '--data', str(self.source), '--validation-report', str(self.report),
-                                    '--output', str(self.output)], cwd='/tmp', capture_output=True, text=True)
+                                    '--output', str(self.output)], cwd=str(self.root), capture_output=True, text=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn('train: 3 samples', completed.stdout)
         self.assertEqual(json.loads((self.output/'manifest.json').read_text())['total_samples'], 6)

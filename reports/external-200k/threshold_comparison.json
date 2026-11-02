@@ -1,0 +1,25 @@
+{
+  "method": "Post-hoc F1-based threshold optimization",
+  "split": "chronological 40k calibration / 160k evaluation",
+  "old_threshold": 0.96233731508255,
+  "new_threshold": 0.9964441657066345,
+  "original_on_160k": {
+    "precision": 0.9136363636363637,
+    "recall": 0.992286331379204,
+    "f1": 0.9513385593847064,
+    "tn": 156455,
+    "fp": 304,
+    "fn": 25,
+    "tp": 3216
+  },
+  "adapted_on_160k": {
+    "precision": 0.9592616168045831,
+    "recall": 0.9299598889231718,
+    "f1": 0.9443835187216043,
+    "tn": 156631,
+    "fp": 128,
+    "fn": 227,
+    "tp": 3014
+  },
+  "note": "Post-hoc analysis; model weights are unchanged."
+}

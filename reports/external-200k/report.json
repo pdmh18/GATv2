@@ -1,0 +1,21 @@
+{
+  "model": "gatv2_skip",
+  "count": 200000,
+  "positives": 4000,
+  "threshold": 0.96233731508255,
+  "threshold_source": "Frozen validation-only threshold from the 500k original model run",
+  "checkpoint_sha256": "7cf71ae4f659a6e061816f3ceae87c8ddb069d8eddb2ef0a10598caa6ea3a976",
+  "original_feature_manifest_sha256": "92a7f43f0a2df07eef0a9ab81535121ef0a574b15976bcae75fd3d6e7befef90",
+  "external_feature_manifest_sha256": "be716b5b5221b602de3359fd25f710cc8c4176a985a72a0fc5b6cbc4b6c8511e",
+  "tn": 195371,
+  "fp": 629,
+  "fn": 56,
+  "tp": 3944,
+  "precision": 0.862453531598513,
+  "recall": 0.986,
+  "f1": 0.9200979820366266,
+  "average_precision": 0.9717913980991169,
+  "roc_auc": 0.999507724489796,
+  "seconds": 498.74,
+  "note": "Synthetic external-seed holdout from same data generator; no training, retuning, or scaler fitting on the external set. The original pipeline partitions are used only to enumerate all requests."
+}

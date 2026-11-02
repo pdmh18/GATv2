@@ -4,12 +4,22 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 import numpy as np
 import torch
-from fraud_pipeline.evaluation.phase5 import choose_threshold
+from fraud_pipeline.evaluation.phase5 import choose_threshold, reference_model_kind
 from fraud_pipeline.models.variants import build_model
 from fraud_pipeline.evaluation.plots import curve_points
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_skip_reference_kind_and_legacy_baseline(self):
+        self.assertEqual(reference_model_kind({'model_kind': 'gatv2_skip'},
+                                              {'model_kind': 'gatv2_skip'}), 'gatv2_skip')
+        self.assertEqual(reference_model_kind({}, {}), 'gatv2')
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            reference_model_kind({'model_kind': 'gatv2_skip'}, {})
+        with self.assertRaisesRegex(ValueError, 'Unsupported'):
+            reference_model_kind({'model_kind': 'unsupported'},
+                                 {'model_kind': 'unsupported'})
+
     def test_threshold_matches_exhaustive_with_ties(self):
         scores=np.array([.9,.7,.7,.5,.1]);labels=np.array([0,1,0,1,0])
         candidates=sorted(set(scores),reverse=True)

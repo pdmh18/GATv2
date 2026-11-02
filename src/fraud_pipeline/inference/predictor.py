@@ -10,6 +10,7 @@ from ..features.dataset import graph_context
 from ..features.export import NODE_TYPES
 from ..ingestion.request_loader import file_hash
 from ..registry.save_load import load
+from ..registry.bundle import SERVING_MODEL_KINDS
 from .contracts import normalize_event, unwrap_record
 from .response import build_response
 from .account_catalog import ACCOUNT_IDENTITY_POLICY, request_account_catalog
@@ -40,11 +41,19 @@ class ReplayPredictor:
         self.zone = datetime.strptime(self.manifest['timezone'], '%z').tzinfo
         self.model, checkpoint = load(self.directory/'model.pt', device=device,
                                       expected_feature_sha256=self.bundle['feature_manifest_sha256'])
-        if checkpoint['model_config'].get('kind', 'gatv2') != 'gatv2':
-            raise ValueError('Only GATv2 inference is supported')
         selection = json.loads((self.directory/'selection.json').read_text())
-        chosen = selection['models']['gatv2']
-        if (selection['status'] != 'frozen_before_test' or selection['selected_model'] != 'gatv2'
+        selected_kind = selection['selected_model']
+        if selected_kind not in SERVING_MODEL_KINDS:
+            raise ValueError(f'Unsupported inference model kind: {selected_kind}')
+        if selected_kind not in selection['models']:
+            raise ValueError(f'Frozen selection has no checkpoint for model kind: {selected_kind}')
+        chosen = selection['models'][selected_kind]
+        # Missing kind metadata is allowed only for legacy GATv2 baseline artifacts.
+        if (self.bundle.get('model_kind', 'gatv2') != selected_kind
+                or checkpoint['model_config'].get('kind', 'gatv2') != selected_kind
+                or self.model.use_skip_connection != (selected_kind == 'gatv2_skip')):
+            raise ValueError('Bundle, checkpoint and selection model kinds disagree')
+        if (selection['status'] != 'frozen_before_test'
                 or selection['feature_manifest_sha256'] != self.bundle['feature_manifest_sha256']
                 or chosen['sha256'] != self.bundle['files']['model.pt']
                 or type(self.bundle['threshold']) not in (int, float)

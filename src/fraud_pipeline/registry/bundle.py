@@ -9,6 +9,7 @@ from ..ingestion.request_loader import file_hash
 from .save_load import load
 
 ARTIFACTS = ('manifest.json', 'preprocessing.json', 'node_preprocessing.json', 'nodes.json')
+SERVING_MODEL_KINDS = ('gatv2', 'gatv2_skip')
 
 
 def export_bundle(training, selection, output, *, model_version):
@@ -18,9 +19,12 @@ def export_bundle(training, selection, output, *, model_version):
     if output.exists():
         raise ValueError('Bundle output exists; choose a new version')
     frozen = json.loads(selection.read_text())
-    if frozen['status'] != 'frozen_before_test' or frozen['selected_model'] != 'gatv2':
-        raise ValueError('Serving requires a frozen GATv2 selection')
-    chosen = frozen['models']['gatv2']
+    kind = frozen['selected_model']
+    if frozen['status'] != 'frozen_before_test' or kind not in SERVING_MODEL_KINDS:
+        raise ValueError(f'Serving requires a frozen GATv2 or GATv2 Skip selection: {kind}')
+    if kind not in frozen['models']:
+        raise ValueError(f'Frozen selection has no checkpoint for model kind: {kind}')
+    chosen = frozen['models'][kind]
     threshold = chosen['threshold']
     if type(threshold) not in (int, float) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise ValueError('Invalid validation threshold')
@@ -29,9 +33,10 @@ def export_bundle(training, selection, output, *, model_version):
     digest = file_hash(training/'feature-manifest.json')
     if digest != frozen['feature_manifest_sha256']:
         raise ValueError('Selection belongs to a different feature artifact')
-    _, checkpoint = load(training/'best.pt', expected_feature_sha256=digest)
-    if checkpoint['model_config'].get('kind', 'gatv2') != 'gatv2':
-        raise ValueError('Only GATv2 serving is supported')
+    model, checkpoint = load(training/'best.pt', expected_feature_sha256=digest)
+    checkpoint_kind = checkpoint['model_config'].get('kind', 'gatv2')
+    if checkpoint_kind != kind or model.use_skip_connection != (kind == 'gatv2_skip'):
+        raise ValueError(f'Checkpoint architecture differs from frozen selection: {kind}')
     manifest = json.loads((training/'feature-manifest.json').read_text())
     if manifest['schema_version'] not in (2, 3):
         raise ValueError('Serving requires feature schema 2 or 3')
@@ -47,7 +52,7 @@ def export_bundle(training, selection, output, *, model_version):
         shutil.copy2(training/'best.pt', staged/'model.pt')
         shutil.copy2(selection, staged/'selection.json')
         files = {p.name: file_hash(p) for p in staged.iterdir()}
-        metadata = {'schema_version': 1, 'model_version': model_version,
+        metadata = {'schema_version': 1, 'model_kind': kind, 'model_version': model_version,
                     'feature_version': f"schema-{manifest['schema_version']}-{digest[:12]}",
                     'feature_manifest_sha256': digest, 'threshold': threshold,
                     'snapshot_seconds': checkpoint['metadata']['snapshot_seconds'],
